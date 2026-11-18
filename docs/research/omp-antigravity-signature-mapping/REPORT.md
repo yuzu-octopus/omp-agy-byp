@@ -2,6 +2,8 @@
 
 Date: 2026-11-18. This report synthesizes four findings files in this directory. No secret values (OAuth client secret, tokens, credential paths) are reproduced; only public identifiers and source anchors are cited.
 
+**Release update:** Google published [Antigravity CLI 1.5.11](https://github.com/google-antigravity/antigravity-cli/releases/tag/1.5.11) on November 18, 2026, after this snapshot. References to 1.5.10 below describe the earlier evidence; no compatibility check was run against 1.5.11.
+
 ## Answer
 
 Four questions were investigated. The short answers:
