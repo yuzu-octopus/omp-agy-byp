@@ -41,7 +41,10 @@ export const ALIAS_RULES: readonly AliasRule[] = [
       type: "object",
       properties: {
         AbsolutePath: { type: "string", description: "Absolute path of the file to view." },
-        StartLine: { type: "integer", description: "Line to start viewing; index base unverified." },
+        StartLine: {
+          type: "integer",
+          description: "Line to start viewing; index base unverified.",
+        },
         EndLine: { type: "integer", description: "Line to stop viewing; index base unverified." },
         IsSkillFile: { type: "boolean", description: "Whether the file is a skill file." },
       },

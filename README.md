@@ -62,3 +62,52 @@ Source-verified limits for the two transport paths, from [F-header-tls](docs/res
 - **Quota and credentials.** `antigravity-cli` uses one credential per account with no key pool, no rotation and no 429 failover. A token refresh drops the CLI's cached token but does not switch accounts, so no rotation cadence is emitted; a quota-exhausted 429 is a hard stop surfaced to the caller.
 - **What the research does and does not say.** Third-party proxies that rotate keys on 429 are documented, but no source ties rotation to a ban — that causal link is unproven, so this project makes no such claim. Google's prohibition on third-party proxy access to Antigravity quotas is a separate, documented policy fact.
 - **Scrubbing scope.** R1–R9 content scrubbing is best-effort text hygiene on omp-owned strings. It is not a transport-identity spoof and not an evasion guarantee; no upstream detector is known to read prompt text, and nothing here asserts that any check is bypassed.
+
+## Round 2: optional tool-alias adapter (host patch required)
+
+The extension in `src/index.ts` can also project six omp file/shell tools onto Antigravity's official tool names and JSON keys. This is a separate, opt-in capability that requires patching the installed omp host; it does not replace the Round 1 text scrubbing described above.
+
+**Default OFF.** Loading the extension on a patched or unpatched host changes nothing until `/agy-byp on`. `/agy-byp off` makes every hook inert again. Nothing here patches a host at install time.
+
+### Host patch requirement and exact commands
+
+The alias seam does not exist in stock 18.22.2. The shipped patch `host-patch/0001-tool-alias.patch` adds it to `pi-ai/src/providers/antigravity-cli/host.ts` and is pinned to host version `18.22.2`. Apply it only to a disposable host copy (see [HANDOFF.md](HANDOFF.md)). Run these from this repository root; `--host` is the install root that contains `pi-ai/`, or the `@oh-my-pi/pi-ai` package directory itself:
+
+```sh
+# Check only (writes nothing). Auto-resolves the runtime host when --host is omitted.
+bun scripts/apply-host-patch.ts --check
+bun scripts/apply-host-patch.ts --check --host /absolute/path/to/host-root
+
+# Apply. Refuses to run without an explicit --host; never auto-targets the real install.
+bun scripts/apply-host-patch.ts --host /absolute/path/to/host-root
+```
+
+Apply verifies the pinned version, writes one `.orig` backup, and re-checks after writing. It is idempotent (`already-applied`) and refuses a drifted host. `bun scripts/check-host-patch.ts` is the verifier module used by the CLI and tests; it has no standalone CLI entrypoint.
+
+### Six-tool safe subset
+
+Only six omp tools are mapped, using Antigravity's published tool names (official hook names) and verbatim published descriptions:
+
+| omp tool | official Antigravity hook name | mapped keys |
+| --- | --- | --- |
+| `read` | `view_file` | `path -> AbsolutePath`, `offset -> StartLine` |
+| `write` | `write_to_file` | `path -> TargetFile`, `content -> CodeContent`, `overwrite -> Overwrite`, `description -> Description` |
+| `edit` | `replace_file_content` | `path -> TargetFile`, `old_string -> TargetContent`, `new_string -> ReplacementContent` |
+| `grep` | `grep_search` | `pattern -> Query`, `path -> SearchPath`, constant `IsRegex: true` |
+| `glob` | `find_by_name` | `pattern -> Pattern`, `path -> SearchDirectory` |
+| `bash` | `run_command` | `command -> CommandLine`, `cwd -> Cwd`, default `WaitMsBeforeAsync: 5000` |
+
+Relative paths are resolved to absolute before projection. No other omp tool is touched. The reverse path maps an incoming alias call back to the canonical omp tool name and canonical arguments before the host validates or records it, so tool ids, approvals and digests stay canonical.
+
+### Native mode and what is not verified
+
+`OMP_AGY_BYP_MODE=native` disables all mimicry: the alias resolvers return `undefined` (no tool projection) and the Round 1 scrub hooks return copies without rewriting omp's strings. Status reports `alias: off` in native mode even on a patched host with the toggle on.
+
+The six schemas mark only the keys omp always supplies (plus synthesized constant/default values) as required. The **exact native model-facing JSON schemas and their `required` arrays remain unverified** — hook documentation publishes key names, not the full schemas. Line-index bases for `view_file` and `replace_file_content` are likewise unverified. Treat this as an experiment against the installed host, not a validated replica.
+
+### Operational limits and honesty
+
+- **No detector-evasion claim.** Nothing here asserts that any upstream check is bypassed, that tool-name projection avoids enforcement, or that any detector reads tool names at all. This is schema-shape experimentation, not a guarantee of access.
+- **Unpatched host still works.** If the patch is `missing` or `drifted`, the extension still loads and Round 1 text scrubbing still runs on toggle. No alias provider is registered when the host hook is absent, so tool names stay omp-native.
+- **Patch status is sampled at load.** The extension checks patch state once when it loads. `/agy-byp status` reports that sample; after patching or reverting a host you must reload omp (and re-link the extension if needed) for the status to change. Mid-session patching cannot change the running session's status.
+- **Alias changes are deferred.** `/agy-byp on|off` marks the alias state pending. Status reports `alias: pending` and the change takes effect at the next prompt (`before_agent_start`); if no further prompt occurs, the pending state persists in status until one does.

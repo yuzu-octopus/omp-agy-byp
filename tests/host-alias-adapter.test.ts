@@ -10,7 +10,11 @@ type ToolInput = { name: string; description: string; parameters: Record<string,
 type ToolDefinition = { name: string; description: string; inputSchema: Record<string, unknown> };
 type Output = { content: unknown[]; isError?: boolean };
 type WriterEvent = { type: "toolCall"; id: string; name: string; arguments: unknown };
-type ResultMessage = { content: { type: "text"; text: string }[]; isError?: boolean; toolName: string };
+type ResultMessage = {
+  content: { type: "text"; text: string }[];
+  isError?: boolean;
+  toolName: string;
+};
 type FixtureHost = {
   writer: { toolCalls: WriterEvent[]; output: unknown[]; finishEvents: unknown[]; done: boolean };
   messages: readonly unknown[];
@@ -25,7 +29,10 @@ type FixtureHost = {
   projectRawResult(result: ResultMessage): Output;
 };
 type FixtureModule = {
-  FixtureHost: new (advertised: readonly ToolDefinition[], messages: readonly unknown[]) => FixtureHost;
+  FixtureHost: new (
+    advertised: readonly ToolDefinition[],
+    messages: readonly unknown[],
+  ) => FixtureHost;
   projectTools(tools: readonly ToolInput[]): ToolDefinition[];
   stableStringifyJson(value: unknown): string;
   transcriptDigest(messages: readonly unknown[]): string;
@@ -282,7 +289,8 @@ beforeAll(async () => {
   // The fixture path is generated from the shipped patch at runtime; a static import cannot name it.
   fixture = (await import(pathToFileURL(hostFile).href)) as FixtureModule;
   const setter = (globalThis as GlobalHooks).__ompAgBypSetToolAliasProvider;
-  if (typeof setter !== "function") throw new Error("fixture did not install the alias provider setter");
+  if (typeof setter !== "function")
+    throw new Error("fixture did not install the alias provider setter");
   const delegate = createToolAliasProvider({ enabled: () => true, mode: () => "generic" });
   setter({
     resolveOutbound(tool) {
@@ -301,7 +309,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  const hooks = globalThis as GlobalHooks & Record<string, unknown>;
+  const hooks = globalThis as Record<string, unknown>;
   for (const name of HOOK_NAMES) {
     const previous = savedHooks.get(name);
     if (previous === undefined) delete hooks[name];
@@ -317,10 +325,10 @@ test("toMcpTool(read) emits the view_file schema for the transport", () => {
   expect(projected).toHaveLength(6);
   expect(projected[0]).toEqual({
     name: "view_file",
-    description: rule?.description,
-    inputSchema: rule?.inputSchema,
+    description: rule!.description,
+    inputSchema: rule!.inputSchema,
   });
-  expect((projected[0]?.inputSchema.required as string[])).toContain("AbsolutePath");
+  expect(projected[0]?.inputSchema.required as string[]).toContain("AbsolutePath");
   expect(calls.outbound).toContain("read");
 });
 
@@ -356,7 +364,9 @@ test("digest is computed from the canonical toolCall event", async () => {
   expect(event).toBeDefined();
   const canonicalDigest = fixture.transcriptDigest(host.messages.concat([event]));
   const aliasDigest = fixture.transcriptDigest(
-    host.messages.concat([{ type: "toolCall", id: event?.id, name: "view_file", arguments: ALIAS_ARGS }]),
+    host.messages.concat([
+      { type: "toolCall", id: event?.id, name: "view_file", arguments: ALIAS_ARGS },
+    ]),
   );
   expect(host.lastDigest).toBe(canonicalDigest);
   expect(host.lastDigest).not.toBe(aliasDigest);

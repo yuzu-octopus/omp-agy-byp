@@ -60,9 +60,7 @@ function baseRule(): AliasRule {
       properties: { AbsolutePath: { type: "string" } },
       required: ["AbsolutePath"],
     },
-    argumentMap: [
-      { kind: "field", source: "path", target: "AbsolutePath", resolveAbsolute: true },
-    ],
+    argumentMap: [{ kind: "field", source: "path", target: "AbsolutePath", resolveAbsolute: true }],
   };
 }
 
@@ -165,11 +163,7 @@ test("schemas expose documented hook keys and conservative required arrays", () 
     expect.arrayContaining(["CommandLine", "Cwd", "WaitMsBeforeAsync"]),
   );
   expect(propsOf(ruleFor("run_command")).WaitMsBeforeAsync?.default).toBe(5000);
-  expect(requiredOf(ruleFor("run_command"))).toEqual([
-    "CommandLine",
-    "Cwd",
-    "WaitMsBeforeAsync",
-  ]);
+  expect(requiredOf(ruleFor("run_command"))).toEqual(["CommandLine", "Cwd", "WaitMsBeforeAsync"]);
 });
 
 test("inbound view_file maps path/offset and resolves AbsolutePath to absolute", () => {
