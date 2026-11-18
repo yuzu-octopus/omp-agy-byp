@@ -52,3 +52,60 @@ omp models -e /absolute/path/to/omp-agy-byp/src/index.ts
 4. Run `/model`, select an eligible `antigravity-cli/<model-id>`, and send one short prompt that does not use tools or modify files. **Pass:** one normal response completes. Record the observed system prompt summary as shown by omp, if available; a failed or different-provider turn is not a pass.
 5. Compare with `OMP_AGY_BYP_MODE=native` in a separate session: with `native`, the scrub hooks return copies without rewriting omp's strings, so any reported system prompt should match the unmodified omp text. Record the difference or its absence; do not claim a detector outcome from it.
 6. Run `/agy-byp off`, then `/agy-byp status`. **Pass:** status reports `off`, and no pause, deactivation, or unpause action is reported. Leave the session in the off state.
+
+## Round 2: host patch and alias round trip (human-only)
+
+Every step below is for the person running omp. Agents do not perform a live Google login, do not access an account, and do not apply a patch to a real install. Never share tokens, codes, callback URLs or credentials with an agent. Report outcomes sanitized, with no raw logs, transcripts, screenshots, keys, environment values or private paths.
+
+### 1. Prepare a disposable host copy
+
+Use a copy of the omp host installation you can modify and discard — never the install you rely on. The patch targets `pi-ai/src/providers/antigravity-cli/host.ts` under the host root and is pinned to `18.22.2`. Copy the whole host root (the directory containing `pi-ai/`, or the `@oh-my-pi/pi-ai` package directory) to a disposable directory, and run omp from that copy so the patched file is the one actually loaded. Run from this repository root:
+
+```sh
+# Check first — writes nothing. Expect: {"action":"checked","status":"missing",...}
+bun scripts/apply-host-patch.ts --check --host /absolute/path/to/disposable-host-root
+
+# Apply only to the disposable copy. Expect: {"action":"applied","status":"ok",...}
+bun scripts/apply-host-patch.ts --host /absolute/path/to/disposable-host-root
+```
+
+Apply writes `<host-root>/pi-ai/src/providers/antigravity-cli/host.ts.orig` once. Re-running apply reports `already-applied`; a drifted or wrong-version host is refused with no write.
+
+### 2. Load the extension and inspect status
+
+From a clean shell, link this repository's extension and verify loading (exit code is zero even on load failure — read stderr for `Failed to load extension`):
+
+```sh
+omp plugin link /absolute/path/to/omp-agy-byp-tool-alias
+omp plugin doctor
+omp models -e /absolute/path/to/omp-agy-byp-tool-alias/src/index.ts
+```
+
+Start a fresh omp session from the disposable host copy. Complete your own account-approved `/login antigravity-cli` if needed — paste codes only into omp's prompt, never into `--api-key` or another command line. Then run `/agy-byp status`.
+
+**Pass:** it reports `off`, the three provider ids, mode/flags, `patch: ok`, and `alias: off`. No credential or token value appears. If patch reports `missing` or `drifted`, the extension still loaded and text scrubbing still works; stop this alias check and review the patch steps. Patch status is sampled when the extension loads, so reload omp after patching or reverting.
+
+### 3. Flip on and run one tool round trip
+
+1. Run `/agy-byp on`. **Pass:** scrubbing is on; status now reports `patch: ok` and `alias: pending`, with the note that alias changes take effect at the next prompt.
+2. Create a small, non-sensitive `alias-smoke.txt` yourself in the disposable directory with one made-up line. Do not put that line in your prompt.
+3. Send one prompt that needs exactly one tool call: `Use the read tool to read alias-smoke.txt and return its only line exactly. Do not edit files or run commands.`
+4. **Pass:** omp shows one successful tool call whose outgoing name is the official alias `view_file` with Antigravity-style keys such as `AbsolutePath`; the final reply matches the file's line; and the workspace is unchanged. A reply with no visible tool call is not a pass. If asked to approve the call, allow only that read. Cancel anything unexpected.
+5. Run `/agy-byp status` again. **Pass:** `alias: active` (no longer pending) after the prompt boundary. Record any difference; do not infer a detector outcome from it.
+
+Optional control: in a separate session with `OMP_AGY_BYP_MODE=native`, repeat the round trip. **Pass:** the tool uses omp's native `read` name and canonical keys, and status reports `alias: off` even with the toggle on and patch ok.
+
+### 4. Revert
+
+Restore the original host file from its backup and confirm the patch is gone:
+
+```sh
+cp /absolute/path/to/disposable-host-root/pi-ai/src/providers/antigravity-cli/host.ts.orig \
+   /absolute/path/to/disposable-host-root/pi-ai/src/providers/antigravity-cli/host.ts
+bun scripts/apply-host-patch.ts --check --host /absolute/path/to/disposable-host-root
+# Expect: {"action":"checked","status":"missing",...}
+```
+
+Then discard the disposable copy and run `/agy-byp off` in the session before closing it. If a real install was patched by mistake, restore its `.orig` the same way and reload omp: a running session keeps reporting the old patch status until reload.
+
+Record sanitized outcomes (`pass`, `fail`, `blocked` or `skipped`) for the check, status, round trip and revert. Rate-limit, quota, access-denial and ambiguous-`429` conditions from the table above remain stop conditions here too.
