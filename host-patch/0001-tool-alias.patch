@@ -19,6 +19,8 @@
         "const agBypProviderSlot = \"__ompAgBypToolAliasProvider\";",
         "const agBypGlobal = globalThis as Record<string, unknown>;",
         "const agBypHookName = (suffix: string): string => `__ompAgByp${suffix}`;",
+        "const agBypCanonicalTools = new Map<string, Tool>();",
+        "agBypGlobal[agBypHookName(\"CanonicalTools\")] = agBypCanonicalTools;",
         "function agBypProvider(): AgBypAliasProvider | undefined {",
         "\treturn agBypGlobal[agBypProviderSlot] as AgBypAliasProvider | undefined;",
         "}",
@@ -38,23 +40,41 @@
       "id": "outbound-projection",
       "anchor": ["\treturn { name: tool.name, description: tool.description, inputSchema: schema };"],
       "replacement": [
-        "\treturn (globalThis as Record<string, ((tool: Tool) => McpToolDefinition | undefined) | undefined>).__ompAgBypProjectTool?.(tool) ?? { name: tool.name, description: tool.description, inputSchema: schema };"
+        "\tconst agBypProjected = (globalThis as Record<string, ((tool: Tool) => McpToolDefinition | undefined) | undefined>).__ompAgBypProjectTool?.(tool);",
+        "\tif (agBypProjected) (globalThis as Record<string, Map<string, Tool> | undefined>).__ompAgBypCanonicalTools?.set(tool.name, tool);",
+        "\treturn agBypProjected ?? { name: tool.name, description: tool.description, inputSchema: schema };"
       ]
     },
     {
       "id": "inbound-reverse-map",
-      "anchor": ["\t\tconst validation = validateJsonSchemaValue(tool.inputSchema, args);"],
+      "anchor": ["\t\tconst tool = agy.tools.get(name);"],
       "replacement": [
         "\t\tconst mappedCall = (globalThis as Record<string, ((name: string, args: unknown) => { toolName: string; args: unknown } | undefined) | undefined>).__ompAgBypReverseToolCall?.(name, args);",
         "\t\tconst canonicalName = mappedCall?.toolName ?? name;",
         "\t\tconst canonicalArgs = mappedCall?.args ?? args;",
-        "\t\tconst validation = validateJsonSchemaValue(tool.inputSchema, canonicalArgs);"
+        "\t\tconst canonicalTool = (globalThis as Record<string, Map<string, Tool> | undefined>).__ompAgBypCanonicalTools?.get(canonicalName);",
+        "\t\tconst tool = canonicalTool ?? agy.tools.get(name);"
       ]
+    },
+    {
+      "id": "inbound-canonical-validation",
+      "anchor": ["\t\tconst validation = validateJsonSchemaValue(tool.inputSchema, args);"],
+      "replacement": ["\t\tconst validation = validateJsonSchemaValue(tool.inputSchema, canonicalArgs);"]
+    },
+    {
+      "id": "pending-canonical-field",
+      "anchor": ["interface PendingCall {", "\tid: string;"],
+      "replacement": ["interface PendingCall {", "\tid: string;", "\tcanonicalName?: string;"]
     },
     {
       "id": "inbound-canonical-call-record",
       "anchor": ["\t\tstep.writer.toolCall({ type: \"toolCall\", id, name, arguments: args });"],
       "replacement": ["\t\tstep.writer.toolCall({ type: \"toolCall\", id, name: canonicalName, arguments: canonicalArgs });"]
+    },
+    {
+      "id": "inbound-pending-canonical",
+      "anchor": ["\t\t\tid,", "\t\t\tstate: \"parked\","],
+      "replacement": ["\t\t\tid,", "\t\t\tcanonicalName,", "\t\t\tstate: \"parked\","]
     },
     {
       "id": "result-projection",
@@ -71,7 +91,7 @@
         "}"
       ],
       "replacement": [
-        "function toMcpOutput(result: ToolResultMessage): McpToolOutput {",
+        "function toMcpOutput(result: ToolResultMessage, canonicalName?: string): McpToolOutput {",
         "\tconst output: McpToolOutput = {",
         "\t\tcontent: result.content.map(part =>",
         "\t\t\tpart.type === \"text\"",
@@ -80,8 +100,16 @@
         "\t\t),",
         "\t\tisError: result.isError,",
         "\t};",
-        "\treturn (globalThis as Record<string, ((toolName: string, result: McpToolOutput) => McpToolOutput | undefined) | undefined>).__ompAgBypProjectResult?.(result.toolName, output) ?? output;",
+        "\treturn (globalThis as Record<string, ((toolName: string, result: McpToolOutput) => McpToolOutput | undefined) | undefined>).__ompAgBypProjectResult?.(canonicalName ?? result.toolName, output) ?? output;",
         "}"
+      ]
+    },
+    {
+      "id": "result-canonical-call-site",
+      "anchor": ["\t\t\t\t\t\tthis.#releasePending()?.settle(toMcpOutput(plan.toolResult));"],
+      "replacement": [
+        "\t\t\t\t\t\tconst released = this.#releasePending();",
+        "\t\t\t\t\t\treleased?.settle(toMcpOutput(plan.toolResult, released.canonicalName));"
       ]
     }
   ]

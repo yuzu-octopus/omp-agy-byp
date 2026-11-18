@@ -10,19 +10,23 @@ type ToolInput = { name: string; description?: string; inputSchema?: unknown };
 type ToolDefinition = { name: string; description?: string; inputSchema: Record<string, unknown> };
 type Output = { content: unknown[]; isError?: boolean };
 type WriterEvent = { type: "toolCall"; id: string; name: string; arguments: unknown };
+type ResultMessage = { content: { type: "text"; text: string }[]; isError?: boolean; toolName: string };
 type FixtureHost = {
   writer: { toolCalls: WriterEvent[]; output: unknown[]; finishEvents: unknown[]; done: boolean };
   messages: readonly unknown[];
   lastDigest: string | undefined;
+  lastSettledOutput: Output | undefined;
+  pending: { id: string; canonicalName?: string } | undefined;
   finishEvents: unknown[];
-  advertisedTools(tools: readonly ToolInput[]): ToolDefinition[];
   toolsKey(tools: readonly ToolDefinition[]): string;
   validate(schema: unknown, args: unknown): { success: boolean; issues: string[] };
   onToolCall(name: string, args: unknown): Promise<Output>;
-  toolResult(toolName: string, text: string): Output;
+  settleResult(plan: { toolResult: ResultMessage }): Output;
+  projectRawResult(result: ResultMessage): Output;
 };
 type FixtureModule = {
-  FixtureHost: new (definitions: readonly ToolDefinition[], messages: readonly unknown[]) => FixtureHost;
+  FixtureHost: new (advertised: readonly ToolDefinition[], messages: readonly unknown[]) => FixtureHost;
+  projectTools(tools: readonly ToolInput[]): ToolDefinition[];
   stableStringifyJson(value: unknown): string;
   transcriptDigest(messages: readonly unknown[]): string;
   validationCalls: unknown[];
@@ -59,8 +63,8 @@ function patchReplacements(): Map<string, string> {
   return new Map(patch.edits.map((edit) => [edit.id, edit.replacement.join("\n")]));
 }
 
-// Builds an isolated host module from the patch's own replacement lines: no live host is
-// imported and the shipped patch is never applied to the installed package.
+// An isolated host module built from the patch's own replacement lines: no live host is
+// imported, the installed package is never patched, and the advertised tool map is real.
 function hostFixtureSource(replacements: Map<string, string>): string {
   const required = (id: string): string => {
     const text = replacements.get(id);
@@ -141,19 +145,27 @@ function hostFixtureSource(replacements: Map<string, string>): string {
     required("outbound-projection"),
     "}",
     required("result-projection"),
+    required("pending-canonical-field"),
+    "}",
+    "export function projectTools(tools: readonly Tool[]): McpToolDefinition[] {",
+    "  return tools.map(toMcpTool);",
+    "}",
     "export class FixtureHost {",
     "  readonly tools: Map<string, McpToolDefinition>;",
     "  readonly writer: StepWriter;",
     "  readonly messages: readonly unknown[];",
     "  lastDigest: string | undefined;",
+    "  lastSettledOutput: McpToolOutput | undefined;",
     "  finishEvents: { kind: string; event: unknown }[] = [];",
-    "  constructor(definitions: readonly McpToolDefinition[], messages: readonly unknown[]) {",
-    "    this.tools = new Map(definitions.map(tool => [tool.name, tool]));",
+    "  pending: PendingCall | undefined;",
+    "  constructor(advertised: readonly McpToolDefinition[], messages: readonly unknown[]) {",
+    "    this.tools = new Map(advertised.map(tool => [tool.name, tool]));",
     "    this.messages = messages;",
+    "    const self = this;",
     "    this.writer = {",
     "      toolCalls: [],",
     "      output: [],",
-    "      finishEvents: this.finishEvents,",
+    "      finishEvents: self.finishEvents,",
     "      done: false,",
     "      toolCall(event) {",
     "        this.toolCalls.push(event);",
@@ -167,9 +179,6 @@ function hostFixtureSource(replacements: Map<string, string>): string {
     "      },",
     "    };",
     "  }",
-    "  advertisedTools(tools: readonly Tool[]): McpToolDefinition[] {",
-    "    return tools.map(toMcpTool);",
-    "  }",
     "  toolsKey(tools: readonly McpToolDefinition[]): string {",
     "    return stableStringifyJson(tools);",
     "  }",
@@ -177,25 +186,41 @@ function hostFixtureSource(replacements: Map<string, string>): string {
     "    return validateJsonSchemaValue(schema, args);",
     "  }",
     "  async onToolCall(name: string, args: unknown): Promise<McpToolOutput> {",
-    "    const tool = this.tools.get(name);",
+    "    const agy = this;",
+    required("inbound-reverse-map"),
     '    if (!tool) return errorOutput("Unknown tool: " + name);',
     "    const step = { writer: this.writer, messages: this.messages };",
-    required("inbound-reverse-map"),
+    required("inbound-canonical-validation"),
     "    if (!validation.success) return errorOutput(describeToolArguments(tool, args, validation));",
     "    if (!isRecord(canonicalArgs)) return errorOutput(describeToolArguments(tool, canonicalArgs));",
     '    const id = "agy_" + crypto.randomUUID().replaceAll("-", "");',
+    "    const result = Promise.withResolvers<McpToolOutput>();",
+    "    const self = this;",
+    "    const pending: PendingCall = {",
+    required("inbound-pending-canonical"),
+    "      settle(output) {",
+    "        self.lastSettledOutput = output;",
+    "        result.resolve(output);",
+    "      },",
+    "    };",
+    "    this.pending = pending;",
     required("inbound-canonical-call-record"),
     "    step.writer.usage(0);",
     "    this.lastDigest = transcriptDigest(step.messages.concat(step.writer.output));",
     '    step.writer.finish("toolUse", { type: "antigravityCli", conversationId: "fixture", digest: this.lastDigest });',
-    '    return { content: [{ type: "text", text: "ok" }], isError: false };',
+    "    return result.promise;",
     "  }",
-    "  toolResult(toolName: string, text: string): McpToolOutput {",
-    "    return toMcpOutput({",
-    '      content: [{ type: "text", text: text }],',
-    "      isError: false,",
-    "      toolName: toolName,",
-    "    });",
+    "  #releasePending(): PendingCall | undefined {",
+    "    const pending = this.pending;",
+    "    this.pending = undefined;",
+    "    return pending;",
+    "  }",
+    "  settleResult(plan: { toolResult: ToolResultMessage }): McpToolOutput {",
+    required("result-canonical-call-site"),
+    "    return this.lastSettledOutput as McpToolOutput;",
+    "  }",
+    "  projectRawResult(result: ToolResultMessage): McpToolOutput {",
+    "    return toMcpOutput(result);",
     "  }",
     "}",
     "export { stableStringifyJson, transcriptDigest };",
@@ -216,6 +241,7 @@ const CANONICAL_SCHEMAS: Record<string, Record<string, unknown>> = {
 };
 const ALIAS_ARGS = { AbsolutePath: "/tmp/alias-adapter-fixture.txt", StartLine: 4, Extra: "drop" };
 const CANONICAL_ARGS = { path: "/tmp/alias-adapter-fixture.txt", offset: 4 };
+const RESULT_TEXT = "canonical text";
 
 function canonicalTools(): ToolInput[] {
   return ALIAS_RULES.map((rule) => ({
@@ -225,16 +251,26 @@ function canonicalTools(): ToolInput[] {
   }));
 }
 
-function definitions(): ToolDefinition[] {
-  return ALIAS_RULES.map((rule) => ({
-    name: rule.aliasName,
-    description: rule.description,
-    inputSchema: CANONICAL_SCHEMAS[rule.toolName],
-  }));
+// The transport map must hold the definitions the patch actually advertises: alias names
+// with alias schemas, never a hand-made alias-name/canonical-schema pairing.
+function advertisedTools(): ToolDefinition[] {
+  return fixture.projectTools(canonicalTools());
 }
 
 function newHost(): FixtureHost {
-  return new fixture.FixtureHost(definitions(), [{ role: "user", content: "fixture prompt" }]);
+  return new fixture.FixtureHost(advertisedTools(), [{ role: "user", content: "fixture prompt" }]);
+}
+
+async function dispatch(host: FixtureHost, args: unknown, resultToolName = "view_file") {
+  const call = host.onToolCall("view_file", args);
+  const settled = host.settleResult({
+    toolResult: {
+      content: [{ type: "text", text: RESULT_TEXT }],
+      isError: false,
+      toolName: resultToolName,
+    },
+  });
+  return { output: await call, settled };
 }
 
 beforeAll(async () => {
@@ -273,8 +309,8 @@ afterAll(() => {
   rmSync(tempRoot, { recursive: true, force: true });
 });
 
-test("toMcpTool(read) emits the view_file schema", () => {
-  const projected = newHost().advertisedTools(canonicalTools());
+test("toMcpTool(read) emits the view_file schema for the transport", () => {
+  const projected = advertisedTools();
   const rule = ALIAS_RULES.find((candidate) => candidate.toolName === "read");
   expect(rule).toBeDefined();
   expect(projected).toHaveLength(6);
@@ -283,12 +319,13 @@ test("toMcpTool(read) emits the view_file schema", () => {
     description: rule?.description,
     inputSchema: rule?.inputSchema,
   });
+  expect((projected[0]?.inputSchema.required as string[])).toContain("AbsolutePath");
   expect(calls.outbound).toContain("read");
 });
 
-test("#onToolCall reverse maps alias name and arguments before step.writer sees them", async () => {
+test("#onToolCall reverse maps before lookup and writes canonical name and args", async () => {
   const host = newHost();
-  const output = await host.onToolCall("view_file", ALIAS_ARGS);
+  const { output } = await dispatch(host, ALIAS_ARGS);
   expect(output.isError).toBe(false);
   expect(host.writer.toolCalls).toHaveLength(1);
   expect(host.writer.toolCalls[0]?.name).toBe("read");
@@ -298,11 +335,13 @@ test("#onToolCall reverse maps alias name and arguments before step.writer sees 
   expect(calls.inbound.at(-1)?.name).toBe("view_file");
 });
 
-test("canonicalArgs validation regression: alias PascalCase keys fail canonical validation", async () => {
+test("canonical lookup validates canonical args against the canonical schema", async () => {
   const host = newHost();
+  const aliasSchema = advertisedTools()[0]?.inputSchema;
+  expect(host.validate(aliasSchema, CANONICAL_ARGS).success).toBe(false);
   expect(host.validate(CANONICAL_SCHEMAS.read, ALIAS_ARGS).success).toBe(false);
   fixture.validationCalls.length = 0;
-  const output = await host.onToolCall("view_file", ALIAS_ARGS);
+  const { output } = await dispatch(host, ALIAS_ARGS);
   expect(output.isError).toBe(false);
   expect(fixture.validationCalls).toHaveLength(1);
   expect(fixture.validationCalls[0]).toEqual(CANONICAL_ARGS);
@@ -311,7 +350,7 @@ test("canonicalArgs validation regression: alias PascalCase keys fail canonical 
 
 test("digest is computed from the canonical toolCall event", async () => {
   const host = newHost();
-  await host.onToolCall("view_file", ALIAS_ARGS);
+  await dispatch(host, ALIAS_ARGS);
   const event = host.writer.toolCalls[0];
   expect(event).toBeDefined();
   const canonicalDigest = fixture.transcriptDigest(host.messages.concat([event]));
@@ -326,21 +365,31 @@ test("digest is computed from the canonical toolCall event", async () => {
   });
 });
 
-test("toMcpOutput projects a canonical result through the toolName seam", () => {
+test("result projection derives the canonical toolName from the pending call", async () => {
   const host = newHost();
   calls.result.length = 0;
-  const output = host.toolResult("read", "canonical text");
-  expect(output).toEqual({ content: [{ type: "text", text: "canonical text" }], isError: false });
+  const { output, settled } = await dispatch(host, ALIAS_ARGS, "view_file");
+  expect(output).toEqual({ content: [{ type: "text", text: RESULT_TEXT }], isError: false });
+  expect(settled).toBe(output);
   expect(calls.result).toEqual(["read"]);
+  expect(host.pending).toBeUndefined();
+  calls.result.length = 0;
+  const fallback = host.projectRawResult({
+    content: [{ type: "text", text: RESULT_TEXT }],
+    isError: false,
+    toolName: "view_file",
+  });
+  expect(fallback).toEqual(output);
+  expect(calls.result).toEqual(["view_file"]);
 });
 
 test("toolsKey is stable across repeated projections", () => {
   const host = newHost();
   const tools = canonicalTools();
-  const first = host.toolsKey(host.advertisedTools(tools));
-  const second = host.toolsKey(host.advertisedTools(tools));
+  const first = host.toolsKey(fixture.projectTools(tools));
+  const second = host.toolsKey(fixture.projectTools(tools));
   expect(second).toBe(first);
-  expect(first).toBe(fixture.stableStringifyJson(host.advertisedTools(tools)));
+  expect(first).toBe(fixture.stableStringifyJson(advertisedTools()));
   expect(first).toContain("view_file");
 });
 
