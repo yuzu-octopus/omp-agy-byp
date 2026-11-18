@@ -89,7 +89,10 @@ test("default off: three hooks and one command, never unpauses, hooks inert", ()
   expect(Object.keys(commands)).toEqual(["agy-byp"]);
   expect(calls).toEqual([]);
   expect(
-    hooks.before_agent_start!({ systemPrompt: ["⁂ Role\nYou are omp's trusted coding assistant."] }, {}),
+    hooks.before_agent_start!(
+      { systemPrompt: ["⁂ Role\nYou are omp's trusted coding assistant."] },
+      {},
+    ),
   ).toBeUndefined();
   expect(hooks.context!({ messages: [] }, {})).toBeUndefined();
   expect(
