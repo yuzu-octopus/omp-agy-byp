@@ -1,5 +1,5 @@
 import type { PluginConfig } from "./config";
-import { scrubText } from "./patterns";
+import { scrubSignatureText } from "./signature-map";
 
 export type Msg = {
   role: string;
@@ -19,7 +19,7 @@ function scrubParts(parts: unknown): void {
       "text" in part &&
       typeof part.text === "string"
     ) {
-      part.text = scrubText(part.text);
+      part.text = scrubSignatureText(part.text);
     }
   }
 }
@@ -59,7 +59,7 @@ export function scrubPayload<T extends Record<string, unknown>>(
           "description" in declaration &&
           typeof declaration.description === "string"
         ) {
-          declaration.description = scrubText(declaration.description);
+          declaration.description = scrubSignatureText(declaration.description);
         }
       }
     }
@@ -74,10 +74,10 @@ export function scrubContextMessages(messages: readonly Msg[], config: PluginCon
 
   for (const message of clones) {
     if (typeof message.content === "string") {
-      message.content = scrubText(message.content);
+      message.content = scrubSignatureText(message.content);
     } else if (Array.isArray(message.content)) {
       for (const part of message.content) {
-        if (typeof part.text === "string") part.text = scrubText(part.text);
+        if (typeof part.text === "string") part.text = scrubSignatureText(part.text);
       }
     }
   }

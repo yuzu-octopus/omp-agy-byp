@@ -1,7 +1,7 @@
 import type { PluginConfig } from "./config";
-import { scrubText } from "./patterns";
+import { scrubSignatureText } from "./signature-map";
 
 export function scrubSystemPrompt(systemPrompt: string[], config: PluginConfig): string[] {
   if (config.mode === "native") return [...systemPrompt];
-  return systemPrompt.map(scrubText);
+  return systemPrompt.map(scrubSignatureText);
 }
