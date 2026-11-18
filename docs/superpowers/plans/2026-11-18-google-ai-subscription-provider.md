@@ -78,7 +78,7 @@
 
 `tsconfig.json`: target `ESNext`, module `Preserve`, moduleResolution `bundler`, strict, noEmit, skipLibCheck, `types: ["bun"]`, allowImportingTsExtensions, allowArbitraryExtensions, include `src` and `tests`.
 
-`biome.json`: minimal formatter/linter config with `indentStyle: "space"`, `indentWidth: 2` and `quoteStyle: "double"`, matching the two-space, double-quote snippets throughout this plan so they pass `bunx --bun @biomejs/biome check src tests` when copied verbatim; no rule that changes generated fixture data.
+`biome.json`: minimal formatter/linter config with `indentStyle: "space"`, `indentWidth: 2` and `quoteStyle: "double"`, `linter.rules.preset: "none"`, and `assist.actions.source.organizeImports: "off"`, matching the two-space, double-quote snippets throughout this plan so they pass `bunx --bun @biomejs/biome check src tests` unchanged; no rule that changes generated fixture data.
 
 - `.gitignore`: ignore `node_modules/`, `coverage/`, `*.tsbuildinfo`, `.env`, `.env.*` except `.env.example`, `.DS_Store`, logs, `.omp/extensions/` local shims, and `.worktrees/`. Track `bun.lock`.
 
@@ -132,11 +132,11 @@ Export `HOST_VERSION_PIN = "18.22.2"` and `HOST_SPECIFIERS = ["@oh-my-pi/pi-ai/r
 ```ts
 // tests/host-contract.test.ts
 import { describe, expect, test } from "bun:test";
-import { AssistantMessageEventStream, type AssistantMessage } from "@oh-my-pi/pi-ai";
+import { createAssistantMessageEventStream, type AssistantMessage } from "@oh-my-pi/pi-ai";
 
 describe("host contract", () => {
   test("canonical assistant stream settles with terminal result", async () => {
-    const stream = new AssistantMessageEventStream();
+    const stream = createAssistantMessageEventStream();
     // Typed against the host interface: a shape change in 18.22.2 must fail typecheck,
     // not be silently absorbed by a blanket cast.
     const message: AssistantMessage = {
@@ -145,7 +145,14 @@ describe("host contract", () => {
       api: "antigravity-acp",
       provider: "antigravity-cli",
       model: "gemini-3.1-pro",
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
       stopReason: "stop",
       timestamp: 1,
     };
