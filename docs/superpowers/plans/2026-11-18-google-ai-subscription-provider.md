@@ -1,11 +1,13 @@
 # Google AI Subscription Provider Implementation Plan
 
-> **DEFERRED — DOCUMENTATION ONLY. DO NOT EXECUTE THIS PLAN.** Not in this phase: no `src/`, `package.json`, `tests/`, `biome.json`, or other implementation files; no `bun install`, `bun test`, or `bunx`; no commits or pushes. This document is the canonical behavioral contract; the only files edited under the current scope are the two named in the header. Every implementation step below is future work, gated on explicit operator authorization.
+> **DEFERRED — DOCUMENTATION ONLY. DO NOT EXECUTE THIS PLAN.** Not in this phase: no `src/`, `package.json`, `tests/`, `biome.json`, or other implementation files; no `bun install`, `bun test`, or `bunx`; no commits or pushes. This document is the canonical behavioral contract. The current docs-only scope is exactly eight files: this plan (`docs/superpowers/plans/2026-11-18-google-ai-subscription-provider.md`); `docs/superpowers/specs/2026-11-18-google-ai-subscription-provider-design.md`; the companion investigation edit `docs/research/omp-antigravity-investigation/F-source-google.md`; and the five files under `docs/research/omp-antigravity-signature-mapping/` — `REPORT.md`, `F-signature-map.md`, `F-header-tls.md`, `F-quota-rotation.md`, `F-antigravity-latest.md`. Every implementation step below is future work, gated on explicit operator authorization.
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Shape what omp sends to a Google AI Pro/Ultra subscription by scrubbing omp-specific identity text from the system prompt, context messages, and provider payload — off by default and enabled only by an explicit `/agy-byp on` command — while leaving the built-in `antigravity-cli` provider and its locally managed `agy acp`, OAuth grant, and native client identity untouched.
+**Goal:** Shape what omp sends to a Google AI Pro/Ultra subscription by scrubbing omp-specific identity text from the system prompt, context messages, and provider payload — off by default and enabled only by an explicit `/agy-byp on` command — while leaving the built-in `antigravity-cli` provider and its locally managed `agy acp`, OAuth grant, and native client identity untouched. The omp→agy content mapping is **best-effort and text-only**: it rephrases identifying prompt text (R1–R9 below) but makes no claim of evading upstream detection and cannot alter `agy`'s transport identity, headers, or TLS.
 
-**Architecture:** One extension factory augments built-in subscription providers: `antigravity-cli` is **primary** (local `agy acp`, `/login antigravity-cli`, `PI_AGY_PATH`, OAuth grant exported into omp's credential store, native identity/headers/UA owned by the CLI); `google-antigravity` is the optional direct-OAuth fallback; `google-gemini-cli` is the legacy path. `google` and `google-vertex` are excluded because they are API-key/ADC lanes, not subscription. The primary CLI path ignores `onPayload`, so content shaping there is done only by `before_agent_start` (system-prompt array) and `context` (messages); the third hook, `before_provider_request`, is registered but scoped to the HTTP-backed `google-antigravity`/`google-gemini-cli` providers, where it rewrites the CCA-shaped outbound payload. A shared marker table rephrases only omp-specific identity strings; all structure, tool names, tool-call ids, labels, `sessionId`, headers, and UA are preserved. The plugin never auto-activates or auto-deactivates: `state.enabled` starts `false`, hooks return `undefined` (inert) until the user runs `/agy-byp on`, and only that explicit command may unpause the fallback.
+**Architecture:** One extension factory augments built-in subscription providers: `antigravity-cli` is **primary** (local `agy acp`, `/login antigravity-cli`, `PI_AGY_PATH`, OAuth grant exported into omp's credential store, native identity/headers/UA owned by the CLI); `google-antigravity` is the optional direct-OAuth fallback; `google-gemini-cli` is the legacy path. **Credential hygiene:** the plugin never sets `PI_AGY_PATH`; it is a pre-existing host env override, and pointing it at a custom binary bypasses omp's managed download/SHA-512 verification and gives the spawned `agy` child access to the staged OAuth token file, so only a trusted binary may be used. `google` and `google-vertex` are excluded because they are API-key/ADC lanes, not subscription. The primary CLI path ignores `onPayload`, so content shaping there is done only by `before_agent_start` (system-prompt array) and `context` (messages); the third hook, `before_provider_request`, is registered but scoped to the HTTP-backed `google-antigravity`/`google-gemini-cli` providers, where it rewrites the CCA-shaped outbound payload. A shared marker table rephrases only omp-specific identity strings; all structure, tool names, tool-call ids, labels, `sessionId`, headers, and UA are preserved. The plugin never auto-activates or auto-deactivates: `state.enabled` starts `false`, hooks return `undefined` (inert) until the user runs `/agy-byp on`, and only that explicit command may unpause the fallback.
+
+**Content-mapping contract (future work):** The R1–R9 signature mapping extends the coarse marker table of Task 2 with loop-safe, text-only rewrite targets for the model-visible surfaces on the primary `antigravity-cli` path (system-prompt text, tool descriptions, messages). On that path omp emits no HTTP headers, User-Agent, or Authorization header and never touches TLS — `agy` owns the socket, headers and CCA envelope — so every rewrite is confined to prompt/message text at a turn boundary. The direct CCA fallback clones native-looking headers but uses Bun's `fetch`/TLS (no JA3/JA4 or ClientHello spoofing), and `antigravity-cli` holds one credential per account with no key pool or rotation. Mapping efficacy against any upstream detector is unverified (Low/speculative); rewrites are best-effort hygiene, not a guarantee.
 
 **Tech Stack:** Bun 1.4.4+, TypeScript ESM, omp extension API, `@oh-my-pi/pi-ai`, `@oh-my-pi/pi-coding-agent`, `@oh-my-pi/pi-ai/registry/oauth`, `bun test`.
 
@@ -39,6 +41,9 @@
 - **Mode/env flags misread:** `native` must leave content value-identical, and tool descriptions must be rewritten only with `OMP_AGY_BYP_SCRUB_TOOL_DESCRIPTIONS=1`. Pinned by the config tests in Task 2 and the opt-in test in Task 4.
 - **Toggling safety:** default-off hooks must be inert, the factory must never unpause on load, and only the explicit `on` command may enable scrubbing and unpause the fallback; `off` must not deactivate providers. Pinned by the default-off and toggle tests in Task 5, including the `unpauseFallback: false` gate, enabled-state `before_agent_start`/`context` output, and `ctx.args` normalization.
 - **Transport metadata:** `requestId`, `userAgent` and `project` are never rewritten. Pinned by the preservation test in Task 4.
+- **Signature-mapping hard preserves:** R1–R9 rewrites are text-only. Tool ids (`read`/`write`/`bash`/`edit`/`grep`/`glob`/`task`/`wait`/`think`/`ast_grep`/`ast_edit`/`lsp`), internal URL schemes (`omp:// local:// artifact:// agent:// proc:// history:// ssh:// skill:// pr:// mr://`), the `skill://<name>` MUST-read-first rule, the `xd://<tool>` + `write` transport, function-call ids (`call-*`, `agy_<uuid>`), ACP meta keys (`_meta.antigravity.systemPrompt.append`, `_meta["antigravity.google/conversation_id"]`), and all header/UA fields must survive verbatim. Pinned by the hard-preserve test in Task 7.
+- **Header/TLS truth:** on `antigravity-cli` headers/UA/TLS are owned by `agy` and unreachable from an extension; the direct CCA fallback clones native headers but not TLS (Bun `fetch`). No task may add a header/TLS rewrite or claim TLS spoofing. Pinned by the transport-truth test and docs in Task 8.
+- **No key rotation:** the plugin registers no key pool, rotation, or 429 failover; `antigravity-cli` has one credential per account. Proxy rotation-on-429 is documented but rotation→ban causation is unproven; do not assert it. Pinned by the single-key/no-rotation assertions in Task 8.
 
 ---
 
@@ -237,21 +242,19 @@ import { scrubText } from "../src/patterns";
 
 test("rephrases every pinned omp marker", () => {
   const input = [
-    "You are omp's trusted coding assistant",
-    "# Skills & Rules",
-    "# Internal URLs",
-    "# xd:// Tool Devices",
-    "# Tool Inventory",
-    "⁂ Tool Policy",
+    "⁂ Role\nYou are omp's trusted coding assistant.",
+    "⁂ Runtime\n# Skills & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>",
+    "# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...",
+    "# xd:// Tool Devices\nWrite JSON args as `content` to `xd://<tool>` via `write`. Invalid args return schema in error → fix/retry.",
+    "# Tool Inventory\n- read: `read`\n- bash: `bash`",
   ].join("\n");
   expect(scrubText(input)).toBe(
     [
-      "You are a helpful coding assistant",
-      "# Skills",
-      "# References",
-      "# Device Tools",
-      "# Available Tools",
-      "## Tool Policy",
+      "⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.",
+      "⁂ Runtime\n# Capabilities & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>",
+      "# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...",
+      "# Device endpoints\nPass JSON arguments as `content` to `xd://<tool>` through `write`; invalid input returns a schema error - correct and retry.",
+      "# Available tools\n- read: `read`\n- bash: `bash`",
     ].join("\n"),
   );
 });
@@ -307,21 +310,18 @@ import { DEFAULT_CONFIG } from "../src/config";
 import { scrubSystemPrompt } from "../src/system-prompt";
 
 const OMP_PROMPT = [
-  "You are omp's trusted coding assistant",
-  "# Skills & Rules",
-  "Matching skill → MUST read `skill://<name>` first.",
-  "# Internal URLs",
-  "⁂ Tool Policy",
+  "⁂ Role\nYou are omp's trusted coding assistant.",
+  "⁂ Runtime\n# Skills & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>",
+  "# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...",
   "Never write to stdout from extension code.",
 ];
 
 test("generic mode rephrases markers but keeps section count and guidance", () => {
   const out = scrubSystemPrompt(OMP_PROMPT, { ...DEFAULT_CONFIG, mode: "generic" });
   expect(out).toHaveLength(OMP_PROMPT.length);
-  expect(out[0]).toBe("You are a helpful coding assistant");
-  expect(out).toContain("# Skills");
-  expect(out).toContain("# References");
-  expect(out).toContain("## Tool Policy");
+  expect(out[0]).toBe("⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.");
+  expect(out[1]).toBe("⁂ Runtime\n# Capabilities & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>");
+  expect(out[2]).toBe("# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...");
   expect(out.some(line => line.includes("skill://"))).toBe(true);
 });
 
@@ -377,12 +377,12 @@ function ccaPayload() {
     request: {
       sessionId: "-123",
       labels: { cascade_id: "a", model_enum: "gemini-3.1-pro", request_id: "t-0", trajectory_id: "t" },
-      systemInstruction: { role: "user", parts: [{ text: "You are omp's trusted coding assistant\n# Skills & Rules" }] },
+      systemInstruction: { role: "user", parts: [{ text: "⁂ Role\nYou are omp's trusted coding assistant." }] },
       contents: [
         {
           role: "user",
           parts: [
-            { text: "# Internal URLs\nhello" },
+            { text: "# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...\nhello" },
             { functionCall: { id: "call-1", name: "read", args: { path: "x" } } },
           ],
         },
@@ -391,7 +391,7 @@ function ccaPayload() {
           parts: [{ functionResponse: { id: "call-1", name: "read", response: { output: "ok" } } }],
         },
       ],
-      tools: [{ functionDeclarations: [{ name: "read", description: "You are omp's trusted coding assistant — read a file" }] }],
+      tools: [{ functionDeclarations: [{ name: "read", description: "⁂ Role\nYou are omp's trusted coding assistant. — read a file" }] }],
       toolConfig: { functionCallingConfig: { mode: "VALIDATED" } },
       generationConfig: { maxOutputTokens: 64000 },
     },
@@ -401,9 +401,9 @@ function ccaPayload() {
 test("generic mode scrubs systemInstruction and contents text", () => {
   const before = ccaPayload();
   const after = scrubPayload(before, { ...DEFAULT_CONFIG, mode: "generic" });
-  expect(after.request.systemInstruction.parts[0].text).toBe("You are a helpful coding assistant\n# Skills");
-  expect(after.request.contents[0].parts[0].text).toBe("# References\nhello");
-  expect(before.request.contents[0].parts[0].text).toBe("# Internal URLs\nhello");
+  expect(after.request.systemInstruction.parts[0].text).toBe("⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.");
+  expect(after.request.contents[0].parts[0].text).toBe("# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nhello");
+  expect(before.request.contents[0].parts[0].text).toBe("# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...\nhello");
 });
 
 test("preserves tool names, tool-call ids, labels, sessionId, requestId, userAgent and structure", () => {
@@ -430,7 +430,7 @@ test("tool descriptions are scrubbed only with the opt-in", () => {
   );
   const on = scrubPayload(before, { ...DEFAULT_CONFIG, mode: "generic", scrubToolDescriptions: true });
   expect(on.request.tools[0].functionDeclarations[0].description).toBe(
-    "You are a helpful coding assistant — read a file",
+    "⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request. — read a file",
   );
 });
 
@@ -442,27 +442,27 @@ test("native mode leaves the payload value-identical", () => {
 
 test("context messages scrub text but keep tool-call ids and names", () => {
   const messages = [
-    { role: "user", content: [{ type: "text", text: "# Skills & Rules\nhi" }], timestamp: 1 },
+    { role: "user", content: [{ type: "text", text: "⁂ Role\nYou are omp's trusted coding assistant.\nhi" }], timestamp: 1 },
     {
       role: "toolResult",
       toolCallId: "call-9",
       toolName: "read",
-      content: [{ type: "text", text: "# Internal URLs\nok" }],
+      content: [{ type: "text", text: "# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...\nok" }],
       isError: false,
       timestamp: 2,
     },
   ];
   const out = scrubContextMessages(messages, { ...DEFAULT_CONFIG, mode: "generic" });
-  expect(out[0].content[0].text).toBe("# Skills\nhi");
-  expect(out[1].content[0].text).toBe("# References\nok");
+  expect(out[0].content[0].text).toBe("⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.\nhi");
+  expect(out[1].content[0].text).toBe("# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nok");
   expect(out[1].toolCallId).toBe("call-9");
   expect(out[1].toolName).toBe("read");
 });
 
 test("context messages with string content are scrubbed without losing fields", () => {
-  const messages = [{ role: "user", content: "# Internal URLs\nhello", timestamp: 3 }];
+  const messages = [{ role: "user", content: "# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...\nhello", timestamp: 3 }];
   const out = scrubContextMessages(messages, { ...DEFAULT_CONFIG, mode: "generic" });
-  expect(out[0].content).toBe("# References\nhello");
+  expect(out[0].content).toBe("# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nhello");
   expect(out[0].role).toBe("user");
   expect(out[0].timestamp).toBe(3);
 });
@@ -552,7 +552,7 @@ function attach(hooks: Record<string, Hook>, commands: Record<string, (ctx: Togg
   return createExtension(deps)(makePi(hooks, commands) as unknown as Parameters<ReturnType<typeof createExtension>>[0]);
 }
 
-const payload = { request: { systemInstruction: { parts: [{ text: "# Skills & Rules" }] } } };
+const payload = { request: { systemInstruction: { parts: [{ text: "⁂ Runtime\n# Skills & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>" }] } } };
 const ctx = (args: string | string[] | undefined, notices: string[] = []): ToggleCtx => ({
   args,
   ui: { notify: (message: string) => { notices.push(message); } },
@@ -608,7 +608,7 @@ test("on enables scrubbing and unpauses fallback once; status reports state and 
   expect(state.enabled).toBe(true);
   expect(calls).toEqual([["google-antigravity"]]);
   const out = hooks.before_provider_request!(payload, { provider: "google-antigravity" }, undefined) as typeof payload;
-  expect(out.request.systemInstruction.parts[0].text).toBe("# Skills");
+  expect(out.request.systemInstruction.parts[0].text).toBe("⁂ Runtime\n# Capabilities & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>");
 });
 
 test("on with unpauseFallback=false enables hooks but never unpauses", () => {
@@ -626,7 +626,7 @@ test("on with unpauseFallback=false enables hooks but never unpauses", () => {
   expect(state.enabled).toBe(true);
   expect(calls).toEqual([]);
   const out = hooks.before_provider_request!(payload, { provider: "google-antigravity" }, undefined) as typeof payload;
-  expect(out.request.systemInstruction.parts[0].text).toBe("# Skills");
+  expect(out.request.systemInstruction.parts[0].text).toBe("⁂ Runtime\n# Capabilities & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>");
 });
 
 test("enabled hooks scrub the system prompt and context messages", () => {
@@ -638,10 +638,10 @@ test("enabled hooks scrub the system prompt and context messages", () => {
     config: DEFAULT_CONFIG,
     state: { enabled: true },
   });
-  const prompt = hooks.before_agent_start!({ systemPrompt: ["You are omp's trusted coding assistant", "# Skills & Rules"] }) as { systemPrompt: string[] };
-  expect(prompt.systemPrompt).toEqual(["You are a helpful coding assistant", "# Skills"]);
-  const messages = hooks.context!({ messages: [{ role: "user", content: "# Internal URLs\nhi", timestamp: 1 }] }) as { messages: { role: string; content: string; timestamp: number }[] };
-  expect(messages.messages[0].content).toBe("# References\nhi");
+  const prompt = hooks.before_agent_start!({ systemPrompt: ["⁂ Role\nYou are omp's trusted coding assistant.", "⁂ Runtime\n# Skills & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>"] }) as { systemPrompt: string[] };
+  expect(prompt.systemPrompt).toEqual(["⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.", "⁂ Runtime\n# Capabilities & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>"]);
+  const messages = hooks.context!({ messages: [{ role: "user", content: "# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...\nhi", timestamp: 1 }] }) as { messages: { role: string; content: string; timestamp: number }[] };
+  expect(messages.messages[0].content).toBe("# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nhi");
   expect(messages.messages[0].timestamp).toBe(1);
 });
 
@@ -720,7 +720,7 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 4: Write the docs**
 
-`README.md`: purpose; default-off behavior and the explicit `/agy-byp on|off|status` workflow; prerequisites (`/login antigravity-cli`, `agy` downloaded/verified by omp, `PI_AGY_PATH` override, `nc` on PATH for IDE-tool transport); provider scope table (`antigravity-cli` primary, `google-antigravity` optional fallback, `google-gemini-cli` legacy; `google`/`google-vertex` excluded); the three hooks and which paths they reach (`before_agent_start` and `context` on all subscription providers, `before_provider_request` on the HTTP-backed fallback/legacy providers only); the env table (`OMP_AGY_BYP_MODE`, `OMP_AGY_BYP_SCRUB_TOOL_DESCRIPTIONS` — HTTP payload seam only, `OMP_AGY_BYP_UNPAUSE_FALLBACK`); and an honest limitation: scrubbing only rephrases omp's own content strings, cannot change `agy`-owned headers/UA or the fixed `agy acp` argv, and there is no guarantee any upstream detector reads prompt text. Never paste an access token into `--api-key`.
+`README.md`: purpose; default-off behavior and the explicit `/agy-byp on|off|status` workflow; prerequisites (`/login antigravity-cli`, `agy` downloaded/verified by omp, `PI_AGY_PATH` override, `nc` on PATH for IDE-tool transport; the plugin never sets `PI_AGY_PATH` — a custom path bypasses omp's managed SHA-512 verification and exposes the staged OAuth token file to the spawned child, so only a trusted binary may be used); provider scope table (`antigravity-cli` primary, `google-antigravity` optional fallback, `google-gemini-cli` legacy; `google`/`google-vertex` excluded); the three hooks and which paths they reach (`before_agent_start` and `context` on all subscription providers, `before_provider_request` on the HTTP-backed fallback/legacy providers only); the env table (`OMP_AGY_BYP_MODE`, `OMP_AGY_BYP_SCRUB_TOOL_DESCRIPTIONS` — HTTP payload seam only, `OMP_AGY_BYP_UNPAUSE_FALLBACK`); and an honest limitation: scrubbing only rephrases omp's own content strings, cannot change `agy`-owned headers/UA or the fixed `agy acp` argv, and there is no guarantee any upstream detector reads prompt text. Never paste an access token into `--api-key`.
 
 `HANDOFF.md`: live-only checks for a human, with exact commands:
 
@@ -768,8 +768,257 @@ Check: Bun-only commands; static `@oh-my-pi/*` imports and matching `HOST_SPECIF
 
 - [ ] **Step 3: Commit any verification-driven fix**
 
+The ledger does **not** exist during the docs-only phase. `subagent-driven-development` creates it when this deferred plan is executed: before the first append, its `task-done` workflow creates `.superpowers/sdd/2026-11-18-google-ai-subscription-provider/progress.md` with first line `# SDD ledger — plan: docs/superpowers/plans/2026-11-18-google-ai-subscription-provider.md`. Do not create it now — the banner above forbids new files in this phase.
+
 If no fix is needed, append this exact entry to the SDD ledger at `.superpowers/sdd/2026-11-18-google-ai-subscription-provider/progress.md` (the plan-scoped progress ledger used by `subagent-driven-development`; its first line is `# SDD ledger — plan: docs/superpowers/plans/2026-11-18-google-ai-subscription-provider.md`):
 
 `Task 6: no verification fix needed — gate suite green in Step 1; no source or doc changes.`
 
 If a fix is needed, commit it with subject `fix: address verification findings`, then append `Task 6: fix committed — <short SHA> — <one-line reason>` to the same ledger. Never invent a different ledger path or entry format; if the resolved workspace path is disambiguated, use that path instead.
+---
+
+### Task 7: R1–R9 signature mapping (text-only) and hard-preserve tests
+
+> FUTURE WORK — part of the DEFERRED plan above. This task refines the coarse `OMP_MARKERS` pairs introduced in Task 2 (`src/patterns.ts`) into the loop-safe R1–R9 targets from `docs/research/omp-antigravity-signature-mapping/F-signature-map.md`. When this task lands, the R1–R9 targets become the single source of truth: update the Task 2/3/4 fixture strings to match in the same commit. Mapping is best-effort and text-only; no detector-evasion claim.
+
+**Files:**
+- Create: `src/signature-map.ts`
+- Test: `tests/signature-map.test.ts`
+- Modify (wiring — the shipped scrubbers must use R1–R9, not Task 2's coarse table): `src/patterns.ts`, `src/system-prompt.ts`, `src/payload.ts`, `src/index.ts`; and the fixture/expectation strings in `tests/patterns.test.ts`, `tests/system-prompt.test.ts`, `tests/payload.test.ts`, `tests/index.test.ts` listed in Step 5 below.
+
+**Interfaces:**
+- Consumes: `MarkerRule` from Task 2 (`src/patterns.ts`); the R1–R9 literal pairs from `docs/research/omp-antigravity-signature-mapping/F-signature-map.md` § Safe rewrites.
+- Produces: `SIGNATURE_RULES: readonly MarkerRule[]` (R1–R9 literal pairs, `to: ""` for the R8 drop) and `scrubSignatureText(text: string): string` from `src/signature-map.ts` — the **single source of truth** for all scrubbing. `OMP_MARKERS` and `scrubText` are removed from `src/patterns.ts`; `src/system-prompt.ts` and `src/payload.ts` import `scrubSignatureText` directly. `src/index.ts` keeps registering the same three hooks and continues to call `scrubSystemPrompt`/`scrubContextMessages`/`scrubPayload`, so the shipped `before_agent_start`, `context` and `before_provider_request` paths use R1–R9 without any new hook registration.
+
+- [ ] **Step 1: Write the failing R1–R9 rewrite tests**
+
+```ts
+// tests/signature-map.test.ts
+import { describe, expect, test } from "bun:test";
+import { scrubSignatureText } from "../src/signature-map";
+
+// These literals are byte-identical copies of the Before/After fenced `text` blocks in
+// docs/research/omp-antigravity-signature-mapping/F-signature-map.md § Safe rewrites.
+const R: Record<string, { before: string; after: string }> = {
+  R1: {
+    before: "⁂ Role\nYou are omp's trusted coding assistant.",
+    after: "⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.",
+  },
+  R2: {
+    before: "⁂ Runtime\n# Skills & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>",
+    // R2 relabels the heading only: the MUST-read line stays byte-identical (hard preserve).
+    after: "⁂ Runtime\n# Capabilities & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>",
+  },
+  R3: {
+    before: "# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...",
+    after: "# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...",
+  },
+  R4: {
+    before: "# xd:// Tool Devices\nWrite JSON args as `content` to `xd://<tool>` via `write`. Invalid args return schema in error → fix/retry.",
+    after: "# Device endpoints\nPass JSON arguments as `content` to `xd://<tool>` through `write`; invalid input returns a schema error - correct and retry.",
+  },
+  R5: {
+    before: "# Tool Inventory\n- read: `read`\n- bash: `bash`",
+    after: "# Available tools\n- read: `read`\n- bash: `bash`",
+  },
+  R6: {
+    // Re-copy both strings from the live R6 fenced blocks (plan 005 marks R6 illustrative).
+    before: "⁂ Tool Policy\n# General\nEvery turn costs seconds: batch all independent reads/searches/checks into one turn. Once the change is verified, stop and report; no extra audits, broad suites, or repo-wide checks unless asked. SHOULD resolve prerequisites, parallelize independent calls. Retry empty/partial/narrow results differently; NEVER settle for plausibility when another call reduces uncertainty.\n\n# Tool I/O\n- Prefer relative paths.\n{{#if intentTracing}}- Most tools take `{{intentField}}`: capitalized 2–6-word present-participle intent (e.g. \"Reading model role settings\").{{/if}}\n\n# Specialized Tools\n{{#has tools \"read\"}}- File/directory reads: `{{toolRefs.read}}` (directory lists entries).{{/has}}\n{{#has tools \"lsp\"}}- Language server available: MUST use `{{toolRefs.lsp}}` for definitions, references, hover; code actions for refactors/imports/fixes. NEVER text-search/edit for code intelligence.{{/has}}\n{{#has tools \"find\"}}- Unknown behavior/location: descriptive `{{toolRefs.find}}` FIRST; NEVER guess `grep`/`glob` targets.{{/has}}\n\n# Exploration\nNEVER open guessed files.{{#has tools \"find\"}} Read `{{toolRefs.find}}` hits only.{{/has}}{{#has tools \"read\"}} Read small files whole; ranges only for large files. NEVER re-read content you already have.{{/has}}",
+    after: "⁂ Tool Policy\n# General\nBatch independent reads and checks; report once the change is verified. Use `task` subagents only when parallel work is explicitly requested.\n# Tool I/O\nPrefer relative paths. Most tools accept an intent label rendered from `{{intentField}}` (`i` in the installed 18.22.2 session).\n# Specialized tools\nUse `read`/`edit`/`write`/`grep`/`glob`/`find`/`bash`/`lsp`/`ast_grep`/`ast_edit` for their named roles; never shell `grep`/`sed`/`awk` for edits.",
+  },
+  R7: {
+    before: "## Identity\n- **Ponytail**: full — lazy senior dev. YAGNI, stdlib first, shortest diff. Non-negotiable default.\n- **Caveman:** default lite. Non-negotiable default; see Caveman Policy section.",
+    after: "## Working style\n- Prefer the smallest correct change. Keep changes boring and maintainable.\n- Be direct and concise in responses.",
+  },
+  R8: {
+    before: "- use-superpowers: At conversation start, check skills before responding, even clarifying questions.",
+    after: "",
+  },
+  R9: {
+    before: "# Delegation\nDelegation preferred. Once design settles, SHOULD fan substantial work to `task`; multi-file changes, refactors, features, tests, investigations strong candidates.\n## Delegation gates\n- Before spawning, map slices/shared contracts; user-enumerated 2+ self-contained runnable slices exempt.",
+    after: "# Coordination\nUse `task` subagents only for explicitly requested parallel work or genuinely independent slices; keep other work inline.",
+  },
+};
+
+for (const id of ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9"]) {
+  test(`${id} rewrites its literal Before block to its literal After block`, () => {
+    expect(scrubSignatureText(R[id]!.before)).toBe(R[id]!.after);
+  });
+}
+
+test("R3 schemes, R5 tool names and R6 tool ids survive their rewrites byte-for-byte", () => {
+  for (const scheme of ["omp://", "local://", "artifact://", "agent://", "proc://", "history://", "ssh://", "skill://", "pr://", "mr://"]) {
+    expect(R.R3!.after, `dropped ${scheme}`).toContain(scheme);
+  }
+  expect(R.R5!.after.split("\n").slice(1)).toEqual(R.R5!.before.split("\n").slice(1));
+  for (const id of ["read", "edit", "write", "grep", "glob", "find", "bash", "lsp", "ast_grep", "ast_edit"]) {
+    expect(R.R6!.after, `dropped ${id}`).toContain(id);
+  }
+});
+
+test("R2 keeps the MUST-read skill rule verbatim", () => {
+  expect(R.R2!.after).toContain("Matching skill → MUST read `skill://<name>` first.");
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `bun test tests/signature-map.test.ts`
+Expected: FAIL — module not found.
+
+- [ ] **Step 3: Implement `src/signature-map.ts`**
+
+Define `SIGNATURE_RULES` as the literal R1–R9 pairs from `docs/research/omp-antigravity-signature-mapping/F-signature-map.md` § Safe rewrites — each rule `{ from, to }`, with `to: ""` for the R8 drop — copied byte-for-byte from that file's fenced `text` blocks. Implement `scrubSignatureText(text: string): string` by applying every rule in order with `String.prototype.replaceAll`, returning the final text. OMP_MARKERS and `scrubText` are removed from `src/patterns.ts` and R1–R9 replaces them: no retained alias, no second table, no fallback to the coarse markers. `src/system-prompt.ts` and `src/payload.ts` import `scrubSignatureText` from `src/signature-map` directly instead of the coarse scrubber. `src/index.ts` needs no new hook — it keeps registering the same three hooks (`before_agent_start`, `context`, `before_provider_request`), which call the migrated `scrubSystemPrompt`/`scrubContextMessages`/`scrubPayload`, so shipped behavior changes with them. Do not add, remove, or rename any id, scheme or meta key; the R2 MUST-read line survives verbatim.
+- [ ] **Step 4: Verify the shipped modules use the mapping (no dead code)**
+
+```ts
+// append to tests/signature-map.test.ts
+import { readFileSync } from "node:fs";
+
+test("shipped modules use R1-R9 as the single source of truth", () => {
+  const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
+  const patterns = read("../src/patterns.ts");
+  const systemPrompt = read("../src/system-prompt.ts");
+  const payload = read("../src/payload.ts");
+  const index = read("../src/index.ts");
+  for (const [name, src] of [["system-prompt", systemPrompt], ["payload", payload]]) {
+    expect(src, `${name} does not call scrubSignatureText`).toContain("scrubSignatureText");
+  }
+  for (const fn of ["scrubSystemPrompt", "scrubContextMessages", "scrubPayload"]) {
+    expect(index, `factory no longer registers ${fn}`).toContain(fn);
+  }
+  expect(patterns).not.toContain("OMP_MARKERS");
+});
+```
+
+- [ ] **Step 5: Write the hard-preserve test**
+
+```ts
+// append to tests/signature-map.test.ts
+test("hard preserves survive every rewrite", () => {
+  const input = [
+    "⁂ Role\nYou are omp's trusted coding assistant.",
+    "⁂ Runtime\n# Skills & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>",
+    "# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...",
+    "# xd:// Tool Devices\nWrite JSON args as `content` to `xd://<tool>` via `write`. Invalid args return schema in error → fix/retry.",
+    "# Tool Inventory\n- read: `read`\n- bash: `bash`",
+    "omp:// local:// artifact:// agent:// proc:// history:// ssh:// skill:// pr:// mr://",
+    "call-1 agy_1234-abcd",
+    "_meta.antigravity.systemPrompt.append _meta[\"antigravity.google/conversation_id\"]",
+    "tools: read write bash edit grep glob task wait think ast_grep ast_edit lsp",
+    "userAgent: antigravity requestId: agent/a/1/t/1 sessionId: -123",
+  ].join("\n");
+  const out = scrubSignatureText(input);
+  const schemes = "omp:// local:// artifact:// agent:// proc:// history:// ssh:// skill:// pr:// mr://".split(" ");
+  for (const kept of [
+    "skill://", "xd://<tool>", "write", "call-1", "agy_1234-abcd",
+    "_meta.antigravity.systemPrompt.append", "_meta[\"antigravity.google/conversation_id\"]",
+    "read", "bash", "task", "wait", "userAgent", "requestId", "sessionId", ...schemes,
+    "Matching skill → MUST read `skill://<name>` first.",
+  ]) expect(out, `dropped ${kept}`).toContain(kept);
+  // R6 condensation is the highest-risk rewrite: pin every embedded tool id after rewrite.
+  for (const id of ["read", "edit", "write", "grep", "glob", "find", "bash", "lsp", "ast_grep", "ast_edit"]) {
+    expect(scrubSignatureText(R.R6!.before), `dropped ${id}`).toContain(id);
+  }
+});
+```
+
+- [ ] **Step 6: Run tests to verify they pass**
+
+Run: `bun test tests/signature-map.test.ts`
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+Subject: `feat: add R1-R9 signature mapping with hard-preserve tests`.
+
+---
+
+### Task 8: Header/TLS truth, single-key/no-rotation docs, and transport invariants
+
+> FUTURE WORK — part of the DEFERRED plan above. Documents the source-verified transport truth from `docs/research/omp-antigravity-signature-mapping/F-header-tls.md` and `F-quota-rotation.md`: the ACP path emits no omp headers/UA/TLS and has one credential with no rotation; the direct CCA fallback clones headers but not TLS; proxy rotation-on-429 is confirmed while rotation→ban causation is unproven.
+
+**Files:**
+- Modify: `README.md` (add an "Identity, headers and quota — honest limits" section)
+- Test: `tests/transport-truth.test.ts`
+
+**Interfaces:**
+- Consumes: `scrubPayload`, `scrubContextMessages` from Task 4; `loadConfig` from Task 2.
+- Produces: no new runtime API — this task pins documentation invariants and asserts no header/rotation surface exists.
+
+- [ ] **Step 1: Write the transport-invariant tests**
+
+```ts
+// tests/transport-truth.test.ts
+import { readFileSync } from "node:fs";
+import { describe, expect, test } from "bun:test";
+import { DEFAULT_CONFIG, loadConfig } from "../src/config";
+import { scrubPayload } from "../src/payload";
+
+test("scrubbing never emits or mutates header/transport fields", () => {
+  const before = {
+    requestId: "agent/a/1/t/1",
+    userAgent: "antigravity",
+    project: "proj",
+    request: {
+      sessionId: "-123",
+      labels: { cascade_id: "a", request_id: "t-0" },
+      systemInstruction: { parts: [{ text: "You are omp's trusted coding assistant." }] },
+    },
+  };
+  const after = scrubPayload(structuredClone(before), { ...DEFAULT_CONFIG, mode: "generic" });
+  expect(after.request.systemInstruction.parts[0].text).not.toContain("omp's");
+  expect(after.requestId).toBe(before.requestId);
+  expect(after.userAgent).toBe(before.userAgent);
+  expect(after.project).toBe(before.project);
+  expect(after.request.sessionId).toBe(before.request.sessionId);
+  expect(after.request.labels).toEqual(before.request.labels);
+  expect(Object.keys(after).sort()).toEqual(Object.keys(before).sort());
+});
+
+test("no rotation or TLS env knob exists in the shipped config or factory", () => {
+  const sources = ["../src/config.ts", "../src/index.ts"]
+    .map(p => readFileSync(new URL(p, import.meta.url), "utf8"))
+    .join("\n");
+  const envNames = [...new Set(sources.match(/OMP_AGY_BYP_[A-Z0-9_]+/g) ?? [])].sort();
+  expect(envNames).toEqual([
+    "OMP_AGY_BYP_MODE",
+    "OMP_AGY_BYP_SCRUB_TOOL_DESCRIPTIONS",
+    "OMP_AGY_BYP_UNPAUSE_FALLBACK",
+  ]);
+  const env = {
+    OMP_AGY_BYP_MODE: "generic",
+    OMP_AGY_BYP_SCRUB_TOOL_DESCRIPTIONS: "1",
+    OMP_AGY_BYP_UNPAUSE_FALLBACK: "0",
+  };
+  expect(Object.keys(loadConfig(env)).sort()).toEqual(
+    ["mode", "scrubToolDescriptions", "unpauseFallback"],
+  );
+});
+
+test("README records the header/TLS truth and single-key limits", () => {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  for (const s of [
+    "no HTTP headers", "TLS", "owns", "one credential per account", "no key pool",
+    "JA3/JA4", "rotation", "best-effort",
+  ]) expect(readme, `README missing: ${s}`).toContain(s);
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `bun test tests/transport-truth.test.ts`
+Expected: FAIL — module not found or README section absent. Fix that before continuing.
+
+- [ ] **Step 3: Add the README truth section**
+
+Document, with citations to the two research files, that: (1) on `antigravity-cli`/`antigravity-acp` omp sends no HTTP headers, User-Agent, or Authorization header and never touches TLS — `agy` owns headers, the CCA envelope and the transport fingerprint, and no extension hook can reach them; (2) the direct `google-antigravity`/`google-gemini-cli` fallback clones native-looking headers (UA, Client-Metadata, Accept-Encoding) with env overrides but runs on Bun's `fetch`/TLS, so there is no JA3/JA4 or ClientHello spoofing; (3) `antigravity-cli` uses one credential per account with no key pool, rotation, or 429 failover, so no rotation cadence is emitted; (4) third-party proxies that rotate keys on 429 are documented, but no source ties rotation to a ban, so make no such claim. State plainly that R1–R9 content scrubbing is best-effort text hygiene, not a transport-identity spoof or an evasion guarantee.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `bun test tests/transport-truth.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+Subject: `docs: record header/TLS truth and single-key limits with invariant tests`.
