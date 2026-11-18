@@ -1,0 +1,88 @@
+{
+  "id": "0001-tool-alias",
+  "hostVersion": "18.22.2",
+  "target": "pi-ai/src/providers/antigravity-cli/host.ts",
+  "edits": [
+    {
+      "id": "seam-declarations",
+      "anchor": [
+        "/** Project a tool onto MCP `tools/list`; the official CLI owns any provider-specific schema conversion. */",
+        "function toMcpTool(tool: Tool): McpToolDefinition {"
+      ],
+      "replacement": [
+        "/** Tool-alias seam installed by omp-agy-byp. Inert until the extension registers a provider. */",
+        "type AgBypAliasProvider = {",
+        "\tresolveOutbound?: (tool: Tool) => McpToolDefinition | undefined;",
+        "\tresolveInbound?: (name: string, args: unknown) => { name: string; args: unknown } | undefined;",
+        "\tresolveResult?: (result: McpToolOutput) => McpToolOutput | undefined;",
+        "};",
+        "const agBypProviderSlot = \"__ompAgBypToolAliasProvider\";",
+        "function agBypProvider(): AgBypAliasProvider | undefined {",
+        "\treturn (globalThis as Record<string, AgBypAliasProvider | undefined>)[agBypProviderSlot];",
+        "}",
+        "export function __ompAgBypSetToolAliasProvider(provider: AgBypAliasProvider): void {",
+        "\t(globalThis as Record<string, AgBypAliasProvider | undefined>)[agBypProviderSlot] = provider;",
+        "}",
+        "export function __ompAgBypReverseToolCall(name: string, args: unknown): { name: string; args: unknown } {",
+        "\treturn agBypProvider()?.resolveInbound?.(name, args) ?? { name, args };",
+        "}",
+        "export function __ompAgBypProjectResult(result: McpToolOutput): McpToolOutput {",
+        "\treturn agBypProvider()?.resolveResult?.(result) ?? result;",
+        "}",
+        "",
+        "/** Project a tool onto MCP `tools/list`; the official CLI owns any provider-specific schema conversion. */",
+        "function toMcpTool(tool: Tool): McpToolDefinition {"
+      ]
+    },
+    {
+      "id": "outbound-projection",
+      "anchor": ["\treturn { name: tool.name, description: tool.description, inputSchema: schema };"],
+      "replacement": [
+        "\treturn (globalThis as Record<string, ((tool: Tool) => McpToolDefinition | undefined) | undefined>).__ompAgBypProjectTool?.(tool) ?? { name: tool.name, description: tool.description, inputSchema: schema };"
+      ]
+    },
+    {
+      "id": "inbound-reverse-map",
+      "anchor": ["\t\tconst validation = validateJsonSchemaValue(tool.inputSchema, args);"],
+      "replacement": [
+        "\t\tconst mappedCall = agBypProvider()?.resolveInbound?.(name, args);",
+        "\t\tconst canonicalName = mappedCall?.name ?? name;",
+        "\t\tconst canonicalArgs = mappedCall?.args ?? args;",
+        "\t\tconst validation = validateJsonSchemaValue(tool.inputSchema, args);"
+      ]
+    },
+    {
+      "id": "inbound-canonical-call-record",
+      "anchor": ["\t\tstep.writer.toolCall({ type: \"toolCall\", id, name, arguments: args });"],
+      "replacement": ["\t\tstep.writer.toolCall({ type: \"toolCall\", id, name: canonicalName, arguments: canonicalArgs });"]
+    },
+    {
+      "id": "result-projection",
+      "anchor": [
+        "function toMcpOutput(result: ToolResultMessage): McpToolOutput {",
+        "\treturn {",
+        "\t\tcontent: result.content.map(part =>",
+        "\t\t\tpart.type === \"text\"",
+        "\t\t\t\t? { type: \"text\", text: part.text }",
+        "\t\t\t\t: { type: \"image\", data: part.data, mimeType: part.mimeType },",
+        "\t\t),",
+        "\t\tisError: result.isError,",
+        "\t};",
+        "}"
+      ],
+      "replacement": [
+        "function toMcpOutput(result: ToolResultMessage): McpToolOutput {",
+        "\tconst output: McpToolOutput = {",
+        "\t\tcontent: result.content.map(part =>",
+        "\t\t\tpart.type === \"text\"",
+        "\t\t\t\t? { type: \"text\", text: part.text }",
+        "\t\t\t\t: { type: \"image\", data: part.data, mimeType: part.mimeType },",
+        "\t\t),",
+        "\t\tisError: result.isError,",
+        "\t};",
+        "\treturn agBypProvider()?.resolveResult?.(output) ?? output;",
+        "}"
+      ]
+    }
+  ]
+}
