@@ -6,10 +6,16 @@ import { scrubContextMessages, scrubPayload } from "../src/payload";
 import { SIGNATURE_RULES, scrubSignatureText } from "../src/signature-map";
 import { scrubSystemPrompt } from "../src/system-prompt";
 
+// R7's line comes from the user-level PERSONALITY.md override, not from the
+// bundled host template. Inject it explicitly so the render is identical on
+// machines with and without that file.
+const R7_FIXTURE = "Default modes: Ponytail full, Caveman lite, Unslop always.";
+const R7_REPLACEMENT = "Working style: smallest correct change, direct and concise replies.";
+
 // Rendered with the installed, pinned 18.22.2 host. Explicit fixtures keep the
 // sections that carry R1-R9 stable across local skill/config discovery.
-async function renderedHostPrompt(): Promise<string> {
-  const built = await buildSystemPrompt({
+function renderOptions(): NonNullable<Parameters<typeof buildSystemPrompt>[0]> {
+  return {
     cwd: process.cwd(),
     noContextFiles: true,
     excludeAgentsMd: true,
@@ -38,7 +44,13 @@ async function renderedHostPrompt(): Promise<string> {
     taskBatch: true,
     scoutAvailable: false,
     taskIrcEnabled: false,
-  });
+    personality: "none",
+    appendSystemPrompt: R7_FIXTURE,
+  };
+}
+
+async function renderedHostPrompt(): Promise<string> {
+  const built = await buildSystemPrompt(renderOptions());
   return built.systemPrompt.join("\n");
 }
 
@@ -79,6 +91,19 @@ test("every shipped R1-R9 rule matches the rendered 18.22.2 host prompt", async 
     expect(rule.from.length, `R${index + 1} is empty`).toBeGreaterThan(0);
     expect(prompt, `R${index + 1} cannot match the rendered host prompt`).toContain(rule.from);
   }
+});
+
+test("R7 is conditional on the personality line and rewrites it when present", async () => {
+  const bareOptions = renderOptions();
+  bareOptions.appendSystemPrompt = undefined;
+  const bare = (await buildSystemPrompt(bareOptions)).systemPrompt.join("\n");
+  expect(bare).not.toContain("# Personality");
+  expect(bare).not.toContain(R7_FIXTURE);
+
+  const scrubbed = scrubSignatureText(R7_FIXTURE);
+  expect(scrubbed).toBe(R7_REPLACEMENT);
+  expect(scrubbed).not.toContain(R7_FIXTURE);
+  expect(scrubSignatureText(await renderedHostPrompt())).not.toContain(R7_FIXTURE);
 });
 
 test("scrubbing removes omp signatures from rendered host text and keeps dispatch contracts", async () => {
