@@ -1,7 +1,12 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@oh-my-pi/pi-coding-agent";
 import { providerPauseReason, setUnpausedProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import { loadConfig, type PluginConfig } from "./config";
-import { FALLBACK_PROVIDER_ID, LEGACY_PROVIDER_ID, PRIMARY_PROVIDER_ID, TOGGLE_COMMAND } from "./ids";
+import {
+  FALLBACK_PROVIDER_ID,
+  LEGACY_PROVIDER_ID,
+  PRIMARY_PROVIDER_ID,
+  TOGGLE_COMMAND,
+} from "./ids";
 import { scrubContextMessages, scrubPayload, type Msg } from "./payload";
 import { scrubSystemPrompt } from "./system-prompt";
 
@@ -18,15 +23,18 @@ export function createExtension({ unpause, pauseReason, config, state }: Extensi
   return (pi: ExtensionAPI): void => {
     pi.setLabel("Google AI Subscription (Antigravity CLI)");
 
-    pi.on("before_agent_start", event => {
+    pi.on("before_agent_start", (event) => {
       if (!state.enabled || !Array.isArray(event.systemPrompt)) return undefined;
       return { systemPrompt: scrubSystemPrompt(event.systemPrompt, config) };
     });
 
-    pi.on("context", event => {
+    pi.on("context", (event) => {
       if (!state.enabled || !Array.isArray(event.messages)) return undefined;
       return {
-        messages: scrubContextMessages(event.messages as unknown as readonly Msg[], config) as unknown as typeof event.messages,
+        messages: scrubContextMessages(
+          event.messages as unknown as readonly Msg[],
+          config,
+        ) as unknown as typeof event.messages,
       };
     });
 
@@ -45,7 +53,9 @@ export function createExtension({ unpause, pauseReason, config, state }: Extensi
         if (action === "on") {
           state.enabled = true;
           if (config.unpauseFallback) unpause([FALLBACK_PROVIDER_ID]);
-          ctx.ui.notify(`agy-byp: scrubbing on (mode=${config.mode}, unpauseFallback=${config.unpauseFallback}).`);
+          ctx.ui.notify(
+            `agy-byp: scrubbing on (mode=${config.mode}, unpauseFallback=${config.unpauseFallback}).`,
+          );
           return;
         }
 

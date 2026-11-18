@@ -13,13 +13,21 @@ export type Msg = {
 function scrubParts(parts: unknown): void {
   if (!Array.isArray(parts)) return;
   for (const part of parts) {
-    if (typeof part === "object" && part !== null && "text" in part && typeof part.text === "string") {
+    if (
+      typeof part === "object" &&
+      part !== null &&
+      "text" in part &&
+      typeof part.text === "string"
+    ) {
       part.text = scrubText(part.text);
     }
   }
 }
 
-export function scrubPayload<T extends Record<string, unknown>>(payload: T, config: PluginConfig): T {
+export function scrubPayload<T extends Record<string, unknown>>(
+  payload: T,
+  config: PluginConfig,
+): T {
   const clone = structuredClone(payload);
   if (config.mode === "native") return clone;
 
@@ -35,7 +43,8 @@ export function scrubPayload<T extends Record<string, unknown>>(payload: T, conf
 
   if ("contents" in request && Array.isArray(request.contents)) {
     for (const content of request.contents) {
-      if (typeof content === "object" && content !== null && "parts" in content) scrubParts(content.parts);
+      if (typeof content === "object" && content !== null && "parts" in content)
+        scrubParts(content.parts);
     }
   }
 
@@ -60,7 +69,7 @@ export function scrubPayload<T extends Record<string, unknown>>(payload: T, conf
 }
 
 export function scrubContextMessages(messages: readonly Msg[], config: PluginConfig): Msg[] {
-  const clones: Msg[] = messages.map(message => structuredClone(message));
+  const clones: Msg[] = messages.map((message) => structuredClone(message));
   if (config.mode === "native") return clones;
 
   for (const message of clones) {

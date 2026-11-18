@@ -1,6 +1,10 @@
 // tests/providers.test.ts
 import { expect, test } from "bun:test";
-import { EXCLUDED_PROVIDER_IDS, isSubscriptionProvider, SUBSCRIPTION_PROVIDER_IDS } from "../src/providers";
+import {
+  EXCLUDED_PROVIDER_IDS,
+  isSubscriptionProvider,
+  SUBSCRIPTION_PROVIDER_IDS,
+} from "../src/providers";
 
 test("roster has CLI primary, direct fallback, and legacy OAuth provider only", () => {
   expect(SUBSCRIPTION_PROVIDER_IDS).toEqual([
