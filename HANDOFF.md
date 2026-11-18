@@ -31,3 +31,24 @@
 Report the UTC timestamp, OS, omp version, whether `nc` was found, whether the managed `agy` setup and login completed, the selected `antigravity-cli/<model-id>` (if any), and separate outcomes for text and optional read (`pass`, `fail`, `blocked`, or `skipped`). For a failure or block, name the step and give the visible error code or a short redacted summary. Do not attach raw logs, transcripts, or screenshots. Omit account identifiers, authorization and callback URLs, codes, tokens, keys, environment values, and private paths.
 
 Primary references: [omp: Antigravity CLI provider](https://github.com/can1357/oh-my-pi/blob/main/docs/providers.md#antigravity-cli) · [Google Antigravity: ACP](https://antigravity.google/docs/ide/extensions/acp/).
+
+## Optional plugin live checks (not run)
+
+These are live checks of the optional extension in `src/index.ts`. They are separate from the built-in-provider smoke test above and have not been run. Do them only where the built-in smoke test is permitted for your account. Report outcomes sanitized, with no tokens, codes, URLs, keys, environment values, or private paths.
+
+Load and inspect the extension from a clean shell:
+
+```sh
+omp plugin link /absolute/path/to/omp-agy-byp
+omp plugin doctor
+omp models -e /absolute/path/to/omp-agy-byp/src/index.ts
+```
+
+`-e` must follow the subcommand (`omp -e ...` is not the same). `--help` never loads extensions, so it cannot verify loading. Exit code is zero even on load failure: read stderr for `Failed to load extension` rather than relying on the exit status.
+
+1. In a fresh omp session, run `/login antigravity-cli` and complete the account-approved sign-in. Paste the code or callback only into omp's prompt, never into `--api-key` or another command line.
+2. Run `/agy-byp status`. **Pass:** it reports `off`, the provider roster (`antigravity-cli`, `google-antigravity`, `google-gemini-cli`), the mode/flags, the fallback pause reason (or `not paused`), and `auth.unpausedProviders` guidance. No credential or token value appears.
+3. Run `/agy-byp on`. **Pass:** it confirms scrubbing is on; with the default `OMP_AGY_BYP_UNPAUSE_FALLBACK` it also unpauses `google-antigravity` once. It must not print any token.
+4. Run `/model`, select an eligible `antigravity-cli/<model-id>`, and send one short prompt that does not use tools or modify files. **Pass:** one normal response completes. Record the observed system prompt summary as shown by omp, if available; a failed or different-provider turn is not a pass.
+5. Compare with `OMP_AGY_BYP_MODE=native` in a separate session: with `native`, the scrub hooks return copies without rewriting omp's strings, so any reported system prompt should match the unmodified omp text. Record the difference or its absence; do not claim a detector outcome from it.
+6. Run `/agy-byp off`, then `/agy-byp status`. **Pass:** status reports `off`, and no pause, deactivation, or unpause action is reported. Leave the session in the off state.
