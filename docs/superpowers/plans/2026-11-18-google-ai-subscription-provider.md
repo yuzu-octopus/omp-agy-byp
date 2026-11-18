@@ -80,7 +80,7 @@
 
 `biome.json`: minimal formatter/linter config with `indentStyle: "space"`, `indentWidth: 2` and `quoteStyle: "double"`, matching the two-space, double-quote snippets throughout this plan so they pass `bunx --bun @biomejs/biome check src tests` when copied verbatim; no rule that changes generated fixture data.
 
-`.gitignore`: ignore `node_modules/`, `coverage/`, `*.tsbuildinfo`, `.env`, `.env.*` except `.env.example`, `.DS_Store`, logs, and `.omp/extensions/` local shims. Track `bun.lock`.
+- `.gitignore`: ignore `node_modules/`, `coverage/`, `*.tsbuildinfo`, `.env`, `.env.*` except `.env.example`, `.DS_Store`, logs, `.omp/extensions/` local shims, and `.worktrees/`. Track `bun.lock`.
 
 `LICENSE`: MIT, copyright Yuzu.
 
@@ -495,8 +495,8 @@ Subject: `feat: scrub omp markers from provider payloads and context`.
 
 **Files:**
 - Create: `src/index.ts`
-- Create: `README.md`
-- Create: `HANDOFF.md`
+- Modify: `README.md` — preserve the existing operator guide and append the plugin section.
+- Modify: `HANDOFF.md` — preserve the existing human smoke test and append the plugin live checks.
 - Test: `tests/index.test.ts`
 
 **Interfaces:**
@@ -512,23 +512,23 @@ import { DEFAULT_CONFIG } from "../src/config";
 import { createExtension } from "../src/index";
 
 type Hook = (...args: unknown[]) => unknown;
-type ToggleCtx = { args: string | string[] | undefined; ui: { notify: (message: string) => void } };
+type CommandCtx = { ui: { notify: (message: string) => void } };
+type CommandHandler = (args: string, ctx: CommandCtx) => void;
 type PiStub = {
   setLabel: (label: string) => void;
-  on: (name: string, handler: Hook) => () => void;
+  on: (name: string, handler: Hook) => void;
   registerProvider: () => never;
   registerOAuthProvider: () => never;
   registerTool: () => never;
-  registerCommand: (name: string, config: { handler: (ctx: ToggleCtx) => void }) => void;
+  registerCommand: (name: string, config: { handler: CommandHandler }) => void;
   logger: { info(): void; warn(): void; error(): void; debug(): void };
 };
 
-function makePi(hooks: Record<string, Hook>, commands: Record<string, (ctx: ToggleCtx) => void>): PiStub {
+function makePi(hooks: Record<string, Hook>, commands: Record<string, CommandHandler>): PiStub {
   return {
     setLabel: () => {},
     on: (name, handler) => {
       hooks[name] = handler;
-      return () => {};
     },
     registerProvider: () => {
       throw new Error("must not register a provider");
@@ -549,19 +549,20 @@ function makePi(hooks: Record<string, Hook>, commands: Record<string, (ctx: Togg
 // One explicit host-boundary cast, not a cast on every fixture: ExtensionAPI is much
 // wider than the members this factory uses. Host-signature drift is caught by
 // tests/drift.test.ts and by the typed AssistantMessage in tests/host-contract.test.ts.
-function attach(hooks: Record<string, Hook>, commands: Record<string, (ctx: ToggleCtx) => void>, deps: Parameters<typeof createExtension>[0]) {
+function attach(hooks: Record<string, Hook>, commands: Record<string, CommandHandler>, deps: Parameters<typeof createExtension>[0]) {
   return createExtension(deps)(makePi(hooks, commands) as unknown as Parameters<ReturnType<typeof createExtension>>[0]);
 }
 
 const payload = { request: { systemInstruction: { parts: [{ text: "⁂ Runtime\n# Skills & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>" }] } } };
-const ctx = (args: string | string[] | undefined, notices: string[] = []): ToggleCtx => ({
-  args,
+const commandCtx = (notices: string[] = []): CommandCtx => ({
   ui: { notify: (message: string) => { notices.push(message); } },
 });
+const requestCtx = (provider: string) => ({ model: { provider } });
+const requestEvent = { type: "before_provider_request" as const, payload };
 
 test("default off: three hooks and one command, never unpauses, hooks inert", () => {
   const hooks: Record<string, Hook> = {};
-  const commands: Record<string, (ctx: ToggleCtx) => void> = {};
+  const commands: Record<string, CommandHandler> = {};
   const calls: string[][] = [];
   attach(hooks, commands, {
     unpause: ids => calls.push(ids),
@@ -579,16 +580,14 @@ test("default off: three hooks and one command, never unpauses, hooks inert", ()
   ]);
   expect(Object.keys(commands)).toEqual(["agy-byp"]);
   expect(calls).toEqual([]);
-  expect(hooks.before_agent_start!({ systemPrompt: ["You are omp's trusted coding assistant"] })).toBeUndefined();
-  expect(hooks.context!({ messages: [] })).toBeUndefined();
-  expect(
-    hooks.before_provider_request!(payload, { provider: "antigravity-cli" }, undefined),
-  ).toBeUndefined();
+  expect(hooks.before_agent_start!({ systemPrompt: ["You are omp's trusted coding assistant"] }, {})).toBeUndefined();
+  expect(hooks.context!({ messages: [] }, {})).toBeUndefined();
+  expect(hooks.before_provider_request!(requestEvent, requestCtx("antigravity-cli"))).toBeUndefined();
 });
 
 test("on enables scrubbing and unpauses fallback once; status reports state and guidance", () => {
   const hooks: Record<string, Hook> = {};
-  const commands: Record<string, (ctx: ToggleCtx) => void> = {};
+  const commands: Record<string, CommandHandler> = {};
   const calls: string[][] = [];
   const notices: string[] = [];
   const state = { enabled: false };
@@ -600,21 +599,21 @@ test("on enables scrubbing and unpauses fallback once; status reports state and 
     state,
   });
 
-  commands["agy-byp"]!(ctx("status", notices));
+  commands["agy-byp"]!("status", commandCtx(notices));
   expect(notices.at(-1)).toContain("off");
   expect(notices.at(-1)).toContain("paused by auth rule");
   expect(notices.at(-1)).toContain("unpausedProviders");
 
-  commands["agy-byp"]!(ctx("on", notices));
+  commands["agy-byp"]!("on", commandCtx(notices));
   expect(state.enabled).toBe(true);
   expect(calls).toEqual([["google-antigravity"]]);
-  const out = hooks.before_provider_request!(payload, { provider: "google-antigravity" }, undefined) as typeof payload;
+  const out = hooks.before_provider_request!(requestEvent, requestCtx("google-antigravity")) as typeof payload;
   expect(out.request.systemInstruction.parts[0].text).toBe("⁂ Runtime\n# Capabilities & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>");
 });
 
 test("on with unpauseFallback=false enables hooks but never unpauses", () => {
   const hooks: Record<string, Hook> = {};
-  const commands: Record<string, (ctx: ToggleCtx) => void> = {};
+  const commands: Record<string, CommandHandler> = {};
   const calls: string[][] = [];
   const state = { enabled: false };
   attach(hooks, commands, {
@@ -623,32 +622,32 @@ test("on with unpauseFallback=false enables hooks but never unpauses", () => {
     config: { ...DEFAULT_CONFIG, unpauseFallback: false },
     state,
   });
-  commands["agy-byp"]!(ctx("on"));
+  commands["agy-byp"]!("on", commandCtx());
   expect(state.enabled).toBe(true);
   expect(calls).toEqual([]);
-  const out = hooks.before_provider_request!(payload, { provider: "google-antigravity" }, undefined) as typeof payload;
+  const out = hooks.before_provider_request!(requestEvent, requestCtx("google-antigravity")) as typeof payload;
   expect(out.request.systemInstruction.parts[0].text).toBe("⁂ Runtime\n# Capabilities & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>");
 });
 
 test("enabled hooks scrub the system prompt and context messages", () => {
   const hooks: Record<string, Hook> = {};
-  const commands: Record<string, (ctx: ToggleCtx) => void> = {};
+  const commands: Record<string, CommandHandler> = {};
   attach(hooks, commands, {
     unpause: () => {},
     pauseReason: () => undefined,
     config: DEFAULT_CONFIG,
     state: { enabled: true },
   });
-  const prompt = hooks.before_agent_start!({ systemPrompt: ["⁂ Role\nYou are omp's trusted coding assistant.", "⁂ Runtime\n# Skills & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>"] }) as { systemPrompt: string[] };
+  const prompt = hooks.before_agent_start!({ systemPrompt: ["⁂ Role\nYou are omp's trusted coding assistant.", "⁂ Runtime\n# Skills & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>"] }, {}) as { systemPrompt: string[] };
   expect(prompt.systemPrompt).toEqual(["⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.", "⁂ Runtime\n# Capabilities & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>"]);
-  const messages = hooks.context!({ messages: [{ role: "user", content: "# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...\nhi", timestamp: 1 }] }) as { messages: { role: string; content: string; timestamp: number }[] };
+  const messages = hooks.context!({ messages: [{ role: "user", content: "# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...\nhi", timestamp: 1 }] }, {}) as { messages: { role: string; content: string; timestamp: number }[] };
   expect(messages.messages[0].content).toBe("# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nhi");
   expect(messages.messages[0].timestamp).toBe(1);
 });
 
-test("command args accept string arrays and default to status", () => {
+test("empty command args default to status", () => {
   const hooks: Record<string, Hook> = {};
-  const commands: Record<string, (ctx: ToggleCtx) => void> = {};
+  const commands: Record<string, CommandHandler> = {};
   const notices: string[] = [];
   const state = { enabled: false };
   attach(hooks, commands, {
@@ -657,15 +656,15 @@ test("command args accept string arrays and default to status", () => {
     config: DEFAULT_CONFIG,
     state,
   });
-  commands["agy-byp"]!(ctx(["on"], notices));
+  commands["agy-byp"]!("on", commandCtx(notices));
   expect(state.enabled).toBe(true);
-  commands["agy-byp"]!(ctx(undefined, notices));
+  commands["agy-byp"]!("", commandCtx(notices));
   expect(notices.at(-1)).toContain("on");
 });
 
 test("off makes hooks inert again without deactivating or re-pausing", () => {
   const hooks: Record<string, Hook> = {};
-  const commands: Record<string, (ctx: ToggleCtx) => void> = {};
+  const commands: Record<string, CommandHandler> = {};
   const calls: string[][] = [];
   const state = { enabled: true };
   attach(hooks, commands, {
@@ -674,17 +673,15 @@ test("off makes hooks inert again without deactivating or re-pausing", () => {
     config: DEFAULT_CONFIG,
     state,
   });
-  commands["agy-byp"]!(ctx("off"));
+  commands["agy-byp"]!("off", commandCtx());
   expect(state.enabled).toBe(false);
   expect(calls).toEqual([]);
-  expect(
-    hooks.before_provider_request!(payload, { provider: "antigravity-cli" }, undefined),
-  ).toBeUndefined();
+  expect(hooks.before_provider_request!(requestEvent, requestCtx("antigravity-cli"))).toBeUndefined();
 });
 
 test("before_provider_request ignores CLI and excluded API-key providers", () => {
   const hooks: Record<string, Hook> = {};
-  const commands: Record<string, (ctx: ToggleCtx) => void> = {};
+  const commands: Record<string, CommandHandler> = {};
   attach(hooks, commands, {
     unpause: () => {},
     pauseReason: () => undefined,
@@ -692,9 +689,7 @@ test("before_provider_request ignores CLI and excluded API-key providers", () =>
     state: { enabled: true },
   });
   for (const provider of ["antigravity-cli", "google", "google-vertex"]) {
-    expect(
-      hooks.before_provider_request!(payload, { provider }, undefined),
-    ).toBeUndefined();
+    expect(hooks.before_provider_request!(requestEvent, requestCtx(provider))).toBeUndefined();
   }
 });
 ```
@@ -710,8 +705,8 @@ Expected: FAIL — module not found.
 1. Calls `pi.setLabel("Google AI Subscription (Antigravity CLI)")`.
 2. Registers `before_agent_start`: when `!state.enabled` return `undefined`; otherwise return `{ systemPrompt: scrubSystemPrompt(event.systemPrompt, config) }`, guarding an absent `systemPrompt`.
 3. Registers `context`: when `!state.enabled` return `undefined`; otherwise return `{ messages: scrubContextMessages(event.messages, config) }`.
-4. Registers `before_provider_request`: return `undefined` when `!state.enabled` or the model provider is neither `FALLBACK_PROVIDER_ID` nor `LEGACY_PROVIDER_ID`; otherwise return `scrubPayload(payload, config)`. The built-in `antigravity-cli` transport never consumes `onPayload`, so the hook is intentionally out of scope there; `google` and `google-vertex` are excluded as API-key/ADC lanes. No header or UA field is ever produced.
-5. Registers `TOGGLE_COMMAND` with a handler that normalizes `ctx.args` (`string` or `string[]`), defaults to `status`, and:
+4. Registers `before_provider_request`: return `undefined` when `!state.enabled` or `ctx.model?.provider` is neither `FALLBACK_PROVIDER_ID` nor `LEGACY_PROVIDER_ID`; otherwise return `scrubPayload(event.payload, config)`. The built-in `antigravity-cli` transport never consumes `onPayload`, so the hook is intentionally out of scope there; `google` and `google-vertex` are excluded as API-key/ADC lanes. No header or UA field is ever produced.
+5. Registers `TOGGLE_COMMAND` with handler `(args: string, ctx: ExtensionCommandContext)`. Normalize the first argument (`string`, trim/lowercase), default empty/unknown to `status`, and notify through `ctx.ui.notify`:
    - `on`: sets `state.enabled = true` and, only when `config.unpauseFallback`, calls `unpause([FALLBACK_PROVIDER_ID])`; notifies that scrubbing is on.
    - `off`: sets `state.enabled = false`; makes **no** pause/deactivate/unpause call; notifies that scrubbing is off.
    - `status`: notifies toggle state, the roster (`PRIMARY_PROVIDER_ID`, `FALLBACK_PROVIDER_ID`, `LEGACY_PROVIDER_ID`), `config.mode` and scrub flags, `pauseReason(FALLBACK_PROVIDER_ID) ?? "not paused"`, and config guidance naming `auth.unpausedProviders` (verified in the installed 18.22.2 build; operator layers only, never a project layer). Never emit token or credential values.
