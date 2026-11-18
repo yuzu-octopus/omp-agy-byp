@@ -1,1 +1,11 @@
 .worktrees/
+node_modules/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+logs/
+.omp/extensions/
