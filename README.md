@@ -52,3 +52,13 @@ Use omp's built-in `antigravity-cli` provider. It launches Google's `agy acp` lo
 ### Honest limitations
 
 Scrubbing only rephrases omp's own content strings. It cannot change `agy`-owned headers or user agents, or the fixed `agy acp` argv. There is no guarantee that any upstream detector reads prompt text at all. Treat this as an experiment, not a way to guarantee access or avoid enforcement; see [the handoff](HANDOFF.md) for live checks.
+
+## Identity, headers and quota — honest limits
+
+Source-verified limits for the two transport paths, from [F-header-tls](docs/research/omp-antigravity-signature-mapping/F-header-tls.md) and [F-quota-rotation](docs/research/omp-antigravity-signature-mapping/F-quota-rotation.md). These describe what the installed omp/agy sources actually do; they are not claims of detector evasion.
+
+- **ACP path (`antigravity-cli` / `antigravity-acp`).** omp sends no HTTP headers at all — no User-Agent and no Authorization header — and never touches TLS. It stages a credential file, spawns `agy acp`, and speaks ACP over stdio plus a loopback tool bridge. `agy` owns the HTTP headers, the CCA envelope and the transport fingerprint; no extension hook (`before_provider_request` / `onPayload` / `onResponse`) can reach them. The fingerprint the backend sees is the native CLI's, which omp cannot tune from source.
+- **Direct CCA fallback (`google-antigravity` / `google-gemini-cli`).** This path does clone native-looking headers — User-Agent, Client-Metadata, Accept-Encoding — with environment overrides inherited from omp's existing header builders, but it runs on Bun's `fetch` and Bun's TLS. There is no JA3/JA4, ClientHello or HTTP/2 fingerprint spoofing here; those remain Bun's. Cloned header strings are not a transport-identity spoof.
+- **Quota and credentials.** `antigravity-cli` uses one credential per account with no key pool, no rotation and no 429 failover. A token refresh drops the CLI's cached token but does not switch accounts, so no rotation cadence is emitted; a quota-exhausted 429 is a hard stop surfaced to the caller.
+- **What the research does and does not say.** Third-party proxies that rotate keys on 429 are documented, but no source ties rotation to a ban — that causal link is unproven, so this project makes no such claim. Google's prohibition on third-party proxy access to Antigravity quotas is a separate, documented policy fact.
+- **Scrubbing scope.** R1–R9 content scrubbing is best-effort text hygiene on omp-owned strings. It is not a transport-identity spoof and not an evasion guarantee; no upstream detector is known to read prompt text, and nothing here asserts that any check is bypassed.
