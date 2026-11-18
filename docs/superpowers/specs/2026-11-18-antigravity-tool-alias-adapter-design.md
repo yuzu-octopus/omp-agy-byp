@@ -29,7 +29,7 @@ Research verdict: impossible from an extension without losing canonical identity
 
 ## Constraints
 
-- Pinned host: omp 18.22.2. `AGY_CLI_DISABLE_AUTO_UPDATE=1`; catalog targets agy 1.5.9. Version drift invalidates the patch.
+- Pinned host: omp 18.22.2. `AGY_CLI_DISABLE_AUTO_UPDATE=1`; installed catalog targets agy 1.5.9 as a historical baseline; owner changelog top is 1.5.11. No six-alias rename through 1.5.11. The overview page's "CLI 1.2.14" is a stale UI mockup, not the release version. Version drift invalidates the patch.
 - `toolsKey = stableStringifyJson(tools)`; changing projected tools while a call is parked abandons the turn and forces restore/replay.
 - `transcriptDigest` hashes `{id, name, arguments}` at call creation. Reverse mapping must happen before that hash, not in a `tool_call` extension handler.
 - `tool_call` handler results cannot rename tools; `toolName` is read-only and `execute` runs after the digest.
@@ -69,7 +69,7 @@ Research verdict: impossible from an extension without losing canonical identity
 
 1. User runs `/agy-byp on`. Toggle state flips; the alias provider becomes active at the next tool preparation boundary, not mid-parked-turn. If deferred, status reports it as pending.
 2. `AgyHost.step` asks `toMcpTool` for each active tool. Patch calls `resolveOutbound`; if a rule exists, projected name/description/schema are served over MCP `tools/list`. Canonical omp tool objects are unchanged.
-3. `agy` calls `mcp_ide-tools_<alias>`. Omp strips the prefix as today, then patch calls `resolveInbound` before schema validation and `step.writer.toolCall`. Canonical name and canonical args flow into digest, approval, TUI and session store; `agy_<uuid>` stays unchanged.
+3. The model calls either eager `mcp_ide-tools_<alias>` or, under default lazy loading, `call_mcp_tool` with `ToolName=<alias>`; omp receives the bare alias via `tools/call` in both cases. Omp strips any prefix as today, then patch calls `resolveInbound` before schema validation and `step.writer.toolCall`. Canonical name and canonical args flow into digest, approval, TUI and session store; `agy_<uuid>` stays unchanged.
 4. Omp executes the canonical tool. Before `toMcpOutput` returns the result to `agy`, patch calls `resolveResult` to reshape it into the alias result vocabulary.
 5. `/agy-byp off` deactivates the provider at the next tool preparation boundary, does not alter provider pause state or host files, and never kills a parked turn. Projected tool shape stays stable until that boundary.
 
@@ -92,7 +92,7 @@ Research verdict: impossible from an extension without losing canonical identity
 
 - Patch version is pinned to omp 18.22.2; any host bump requires re-review and a new patch file. Never silently apply a fuzzy patch.
 - The plugin refuses to activate the alias adapter on an unpatched or drifted host; it does not refuse to load, and Round 1 text scrubbing stays available.
-- Docs state plainly: the alias target is a safe subset of hook-doc tool names and arguments; agy-internal tools (`manage_task`, MCP resources, permission/subagent internals) are out of scope; exact agy runtime schemas are unverified.
+- Docs state plainly: alias target is a safe subset of hook-doc tool names and arguments; agy-internal tools including `run_workflow`, `manage_task`, MCP resources, permissions and subagents are out of scope; there are no alias additions in v1. Exact schemas/required arrays, `StartLine` base, literal `ide-tools` server name and bridge eager/lazy config remain unverified.
 
 ## Left to the builder
 

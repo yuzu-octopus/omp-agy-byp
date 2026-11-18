@@ -18,7 +18,7 @@
 - `OMP_AGY_BYP_MODE=native` disables text scrubbing and tool alias mimicry.
 - Unpatched host: extension loads; Round 1 text scrubbing works; alias provider inactive; status reports patch state.
 - Patched host: alias only active when toggle ON and mode is `generic`. Toggle changes apply at the next `AgyHost.step` tool preparation boundary, never mid-parked-turn.
-- Alias target: hook-doc safe subset only (`view_file`, `write_to_file`, `replace_file_content`, `grep_search`, `find_by_name`, `run_command`). No SDK enum transplant. No `manage_task`, MCP resources, permissions or subagent tools.
+- Alias target: hook-doc safe subset only (`view_file`, `write_to_file`, `replace_file_content`, `grep_search`, `find_by_name`, `run_command`). Owner changelog top is 1.5.11; overview "CLI 1.2.14" is a stale mockup; six aliases unchanged through 1.5.11. No SDK enum, no `run_workflow`/`manage_task`/permissions/subagents/MCP resources, no alias additions in v1.
 - Hard preserves: canonical tool ids/names, `agy_<uuid>`, `antigravityCli` payload, `transcriptDigest` inputs, approval keys, URL schemes, ACP `_meta`, headers/UA/TLS.
 - No OAuth, token, relay, endpoint, quota, rotation or live Google probes.
 - Patch is pinned to installed omp 18.22.2 and must refuse drift.
@@ -131,12 +131,12 @@ Exact safe-subset rules:
 
 | omp tool | alias | argument map |
 |---|---|---|
-| `read` | `view_file` | `path -> AbsolutePath`, `offset -> StartLine` |
-| `write` | `write_to_file` | `path -> TargetFile`, `content -> CodeContent`, `overwrite -> Overwrite` |
-| `edit` | `replace_file_content` | `path -> TargetFile`, `old_string -> TargetContent`, `new_string -> ReplacementContent` |
-| `grep` | `grep_search` | `pattern -> Query`, `path -> SearchPath` |
-| `glob` | `find_by_name` | `pattern -> Pattern`, `path -> SearchDirectory` |
-| `bash` | `run_command` | `command -> CommandLine`, `cwd -> Cwd` |
+| `read` | `view_file` | `path -> AbsolutePath` (resolve absolute), `offset -> StartLine` (base unverified) |
+| `write` | `write_to_file` | `path -> TargetFile` (absolute), `content -> CodeContent`, `overwrite -> Overwrite`, `description -> Description` optional; required-looking: TargetFile, Overwrite, CodeContent, Description |
+| `edit` | `replace_file_content` | `path -> TargetFile` (absolute), `old_string -> TargetContent`, `new_string -> ReplacementContent`; optional Instruction/Description/AllowMultiple/StartLine/EndLine; required-looking: TargetFile, Instruction, Description, AllowMultiple, TargetContent, ReplacementContent, StartLine, EndLine |
+| `grep` | `grep_search` | `pattern -> Query`, `path -> SearchPath`, constant `IsRegex: true`; optional CaseInsensitive/Includes/MatchPerLine |
+| `glob` | `find_by_name` | `pattern -> Pattern`, `path -> SearchDirectory` (absolute); optional Type/Excludes/Extensions/FullPath/MaxDepth |
+| `bash` | `run_command` | `command -> CommandLine`, `cwd -> Cwd`, `waitMsBeforeAsync -> WaitMsBeforeAsync` optional default 5000; required-looking: CommandLine, Cwd, WaitMsBeforeAsync |
 
 - [ ] **Step 1: Write failing provider tests**
 
@@ -147,7 +147,7 @@ Expected: FAIL — module missing.
 
 - [ ] **Step 2: Implement `src/tool-alias.ts`**
 
-Define JSON schemas for the six aliases using hook-doc argument keys with `type`, `properties`, and `required` where mandatory. Keep descriptions short and factual. `resolveInbound` must reject unknown aliases and translate only declared keys; extra keys are dropped. `resolveResult` is identity for v1 except wrapping text under `{ content: [{type:"text", text}] }` when a canonical result is a plain string.
+Define JSON schemas for the six aliases using the documented hook keys, `type`, `properties`, and `required` where omp always supplies a value. Use official descriptions verbatim: view_file "View the contents of a file."; write_to_file "Create new files."; replace_file_content "Edit a single contiguous block of text in a file."; grep_search "Run fast text searches within specific paths."; find_by_name "Search for files and directories using glob patterns."; run_command "Propose a Bash command to run." Unmarked hook keys are required-looking, but the exact native required arrays are unverified; encode optional keys as optional. Resolve relative paths to absolute before projection. Add `WaitMsBeforeAsync` optional with default 5000. Project constant `IsRegex: true` for grep_search. `resolveInbound` must reject unknown aliases and translate only declared keys; extra keys are dropped. `resolveResult` is identity for v1 except wrapping text under `{ content: [{type:"text", text}] }` when a canonical result is a plain string.
 
 - [ ] **Step 3: Re-run focused test**
 
