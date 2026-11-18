@@ -1,5 +1,5 @@
 // tests/index.test.ts
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { DEFAULT_CONFIG } from "../src/config";
 import { createExtension } from "../src/index";
 
@@ -269,4 +269,159 @@ test("google and google-vertex pass through every hook untouched", () => {
     expect(hooks.context!({ messages }, ctx)).toBeUndefined();
     expect(hooks.before_provider_request!(requestEvent, ctx)).toBeUndefined();
   }
+});
+
+// --- Task 3: alias provider wiring and patch status ---
+
+type AliasProvider = {
+  resolveOutbound(tool: { name: string }): unknown;
+  resolveInbound(aliasName: string, args: unknown): unknown;
+  resolveResult(toolName: string, result: unknown): unknown;
+};
+type GlobalAliasHook = typeof globalThis & {
+  __ompAgBypSetToolAliasProvider?: (provider: AliasProvider) => void;
+};
+const aliasGlobal = globalThis as GlobalAliasHook;
+type PatchStatus = "ok" | "missing" | "drifted";
+
+afterEach(() => {
+  delete aliasGlobal.__ompAgBypSetToolAliasProvider;
+});
+
+function captureProvider(): AliasProvider[] {
+  const providers: AliasProvider[] = [];
+  aliasGlobal.__ompAgBypSetToolAliasProvider = (provider) => {
+    providers.push(provider);
+  };
+  return providers;
+}
+
+function depsFor(
+  state: { enabled: boolean },
+  patch: PatchStatus,
+  mode: "generic" | "native" = "generic",
+): Parameters<typeof createExtension>[0] {
+  return {
+    unpause: () => {},
+    pauseReason: () => undefined,
+    config: { ...DEFAULT_CONFIG, mode },
+    state,
+    checkPatch: () => ({ status: patch }),
+  };
+}
+
+test("registers the alias provider at load only when the host hook is a function", () => {
+  const providers = captureProvider();
+  attach({}, {}, depsFor({ enabled: false }, "ok"));
+  expect(providers).toHaveLength(1);
+  expect(typeof providers[0]!.resolveOutbound).toBe("function");
+  expect(typeof providers[0]!.resolveInbound).toBe("function");
+  expect(typeof providers[0]!.resolveResult).toBe("function");
+
+  delete aliasGlobal.__ompAgBypSetToolAliasProvider;
+  expect(() => attach({}, {}, depsFor({ enabled: false }, "ok"))).not.toThrow();
+  expect(providers).toHaveLength(1);
+
+  aliasGlobal.__ompAgBypSetToolAliasProvider =
+    "not-a-function" as unknown as GlobalAliasHook["__ompAgBypSetToolAliasProvider"];
+  expect(() => attach({}, {}, depsFor({ enabled: false }, "ok"))).not.toThrow();
+  expect(providers).toHaveLength(1);
+});
+
+test("alias resolvers are inert when off, native, or patch is not ok", () => {
+  const cases: Array<{
+    enabled: boolean;
+    mode: "generic" | "native";
+    patch: PatchStatus;
+    active: boolean;
+  }> = [
+    { enabled: false, mode: "generic", patch: "ok", active: false },
+    { enabled: true, mode: "native", patch: "ok", active: false },
+    { enabled: true, mode: "generic", patch: "missing", active: false },
+    { enabled: true, mode: "generic", patch: "drifted", active: false },
+    { enabled: true, mode: "generic", patch: "ok", active: true },
+  ];
+  for (const c of cases) {
+    const providers = captureProvider();
+    attach({}, {}, depsFor({ enabled: c.enabled }, c.patch, c.mode));
+    const provider = providers[0]!;
+    const outbound = provider.resolveOutbound({ name: "bash" });
+    const inbound = provider.resolveInbound("run_command", { CommandLine: "ls" });
+    const result = provider.resolveResult("bash", "done");
+    if (c.active) {
+      expect(outbound).toMatchObject({ name: "run_command" });
+      expect(inbound).toEqual({
+        toolName: "bash",
+        args: { command: "ls", waitMsBeforeAsync: 5000 },
+      });
+      expect(result).toEqual({ content: [{ type: "text", text: "done" }] });
+    } else {
+      expect(outbound).toBeUndefined();
+      expect(inbound).toBeUndefined();
+      expect(result).toBeUndefined();
+    }
+    delete aliasGlobal.__ompAgBypSetToolAliasProvider;
+  }
+});
+
+test("patch missing or drifted keeps text scrubbing and reports patch state without secrets", () => {
+  for (const patch of ["missing", "drifted"] as const) {
+    const hooks: Record<string, Hook> = {};
+    const commands: Record<string, CommandHandler> = {};
+    const notices: string[] = [];
+    attach(hooks, commands, depsFor({ enabled: true }, patch));
+    const ctx = requestCtx("antigravity-cli");
+    const out = hooks.before_provider_request!(requestEvent, ctx) as typeof payload;
+    expect(out.request.systemInstruction.parts[0].text).toContain("# Capabilities & Rules");
+    const prompt = hooks.before_agent_start!(
+      {
+        systemPrompt: [
+          "⁂ Runtime\n# Skills & Rules\nmatching skill → MUST read skill://<name> first.",
+        ],
+      },
+      ctx,
+    ) as { systemPrompt: string[] };
+    expect(prompt.systemPrompt[0]).toContain("# Capabilities & Rules");
+    commands["agy-byp"]!("status", commandCtx(notices));
+    expect(notices.at(-1)).toContain(`patch: ${patch}`);
+    expect(notices.at(-1)).not.toContain("Bearer ");
+    expect(notices.at(-1)).not.toContain("sk-");
+  }
+});
+
+test("toggle sets a pending alias state cleared at before_agent_start", () => {
+  const providers = captureProvider();
+  const hooks: Record<string, Hook> = {};
+  const commands: Record<string, CommandHandler> = {};
+  const notices: string[] = [];
+  const state = { enabled: false };
+  attach(hooks, commands, depsFor(state, "ok"));
+  const provider = providers[0]!;
+  const prompt = { systemPrompt: ["You are omp's trusted coding assistant."] };
+
+  commands["agy-byp"]!("status", commandCtx(notices));
+  expect(notices.at(-1)).toContain("patch: ok");
+  expect(notices.at(-1)).toContain("alias: off");
+
+  commands["agy-byp"]!("on", commandCtx(notices));
+  expect(state.enabled).toBe(true);
+  expect("aliasPending" in state && state.aliasPending === true).toBe(true);
+  commands["agy-byp"]!("status", commandCtx(notices));
+  expect(notices.at(-1)).toContain("alias: pending");
+  expect(provider.resolveOutbound({ name: "bash" })).toBeUndefined();
+
+  hooks.before_agent_start!(prompt, requestCtx("antigravity-cli"));
+  expect("aliasPending" in state && state.aliasPending === false).toBe(true);
+  commands["agy-byp"]!("status", commandCtx(notices));
+  expect(notices.at(-1)).toContain("alias: active");
+  expect(provider.resolveOutbound({ name: "bash" })).toMatchObject({ name: "run_command" });
+
+  commands["agy-byp"]!("off", commandCtx(notices));
+  expect("aliasPending" in state && state.aliasPending === true).toBe(true);
+  commands["agy-byp"]!("status", commandCtx(notices));
+  expect(notices.at(-1)).toContain("alias: pending");
+  hooks.before_agent_start!(prompt, requestCtx("antigravity-cli"));
+  commands["agy-byp"]!("status", commandCtx(notices));
+  expect(notices.at(-1)).toContain("alias: off");
+  expect(provider.resolveOutbound({ name: "bash" })).toBeUndefined();
 });
