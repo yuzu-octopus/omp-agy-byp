@@ -19,7 +19,7 @@
         "const agBypProviderSlot = \"__ompAgBypToolAliasProvider\";",
         "const agBypGlobal = globalThis as Record<string, unknown>;",
         "const agBypHookName = (suffix: string): string => `__ompAgByp${suffix}`;",
-        "const agBypCanonicalTools = new Map<string, Tool>();",
+        "const agBypCanonicalTools = new Map<string, McpToolDefinition>();",
         "agBypGlobal[agBypHookName(\"CanonicalTools\")] = agBypCanonicalTools;",
         "function agBypProvider(): AgBypAliasProvider | undefined {",
         "\treturn agBypGlobal[agBypProviderSlot] as AgBypAliasProvider | undefined;",
@@ -40,19 +40,20 @@
       "id": "outbound-projection",
       "anchor": ["\treturn { name: tool.name, description: tool.description, inputSchema: schema };"],
       "replacement": [
-        "\tconst agBypProjected = (globalThis as Record<string, ((tool: Tool) => McpToolDefinition | undefined) | undefined>).__ompAgBypProjectTool?.(tool);",
-        "\tif (agBypProjected) (globalThis as Record<string, Map<string, Tool> | undefined>).__ompAgBypCanonicalTools?.set(tool.name, tool);",
-        "\treturn agBypProjected ?? { name: tool.name, description: tool.description, inputSchema: schema };"
+        "\tconst agBypCanonical: McpToolDefinition = { name: tool.name, description: tool.description, inputSchema: schema };",
+        "\tconst agBypProjected = (globalThis as unknown as Record<string, ((tool: Tool) => McpToolDefinition | undefined) | undefined>).__ompAgBypProjectTool?.(tool);",
+        "\tif (agBypProjected) (globalThis as unknown as Record<string, Map<string, McpToolDefinition> | undefined>).__ompAgBypCanonicalTools?.set(tool.name, agBypCanonical);",
+        "\treturn agBypProjected ?? agBypCanonical;"
       ]
     },
     {
       "id": "inbound-reverse-map",
       "anchor": ["\t\tconst tool = agy.tools.get(name);"],
       "replacement": [
-        "\t\tconst mappedCall = (globalThis as Record<string, ((name: string, args: unknown) => { toolName: string; args: unknown } | undefined) | undefined>).__ompAgBypReverseToolCall?.(name, args);",
+        "\t\tconst mappedCall = (globalThis as unknown as Record<string, ((name: string, args: unknown) => { toolName: string; args: unknown } | undefined) | undefined>).__ompAgBypReverseToolCall?.(name, args);",
         "\t\tconst canonicalName = mappedCall?.toolName ?? name;",
         "\t\tconst canonicalArgs = mappedCall?.args ?? args;",
-        "\t\tconst canonicalTool = (globalThis as Record<string, Map<string, Tool> | undefined>).__ompAgBypCanonicalTools?.get(canonicalName);",
+        "\t\tconst canonicalTool = (globalThis as unknown as Record<string, Map<string, McpToolDefinition> | undefined>).__ompAgBypCanonicalTools?.get(canonicalName);",
         "\t\tconst tool = canonicalTool ?? agy.tools.get(name);"
       ]
     },
@@ -60,6 +61,14 @@
       "id": "inbound-canonical-validation",
       "anchor": ["\t\tconst validation = validateJsonSchemaValue(tool.inputSchema, args);"],
       "replacement": ["\t\tconst validation = validateJsonSchemaValue(tool.inputSchema, canonicalArgs);"]
+    },
+    {
+      "id": "inbound-canonical-args-narrowing",
+      "anchor": ["\t\tif (!isRecord(args)) return errorOutput(describeToolArguments(tool, args));"],
+      "replacement": [
+        "\t\tif (!isRecord(args)) return errorOutput(describeToolArguments(tool, args));",
+        "\t\tif (!isRecord(canonicalArgs)) return errorOutput(describeToolArguments(tool, canonicalArgs));"
+      ]
     },
     {
       "id": "pending-canonical-field",
@@ -100,7 +109,7 @@
         "\t\t),",
         "\t\tisError: result.isError,",
         "\t};",
-        "\treturn (globalThis as Record<string, ((toolName: string, result: McpToolOutput) => McpToolOutput | undefined) | undefined>).__ompAgBypProjectResult?.(canonicalName ?? result.toolName, output) ?? output;",
+        "\treturn (globalThis as unknown as Record<string, ((toolName: string, result: McpToolOutput) => McpToolOutput | undefined) | undefined>).__ompAgBypProjectResult?.(canonicalName ?? result.toolName, output) ?? output;",
         "}"
       ]
     },

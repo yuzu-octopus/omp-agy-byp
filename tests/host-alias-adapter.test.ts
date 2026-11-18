@@ -6,8 +6,8 @@ import { pathToFileURL } from "node:url";
 import { ALIAS_RULES, createToolAliasProvider, type ToolAliasProvider } from "../src/tool-alias";
 
 type PatchEdit = { id: string; replacement: string[] };
-type ToolInput = { name: string; description?: string; inputSchema?: unknown };
-type ToolDefinition = { name: string; description?: string; inputSchema: Record<string, unknown> };
+type ToolInput = { name: string; description: string; parameters: Record<string, unknown> };
+type ToolDefinition = { name: string; description: string; inputSchema: Record<string, unknown> };
 type Output = { content: unknown[]; isError?: boolean };
 type WriterEvent = { type: "toolCall"; id: string; name: string; arguments: unknown };
 type ResultMessage = { content: { type: "text"; text: string }[]; isError?: boolean; toolName: string };
@@ -72,8 +72,8 @@ function hostFixtureSource(replacements: Map<string, string>): string {
     return text;
   };
   return [
-    "type Tool = { name: string; description?: string; inputSchema?: unknown };",
-    "type McpToolDefinition = { name: string; description?: string; inputSchema: Record<string, unknown> };",
+    "type Tool = { name: string; description: string; parameters: unknown };",
+    "type McpToolDefinition = { name: string; description: string; inputSchema: Record<string, unknown> };",
     'type TextPart = { type: "text"; text: string };',
     'type ImagePart = { type: "image"; data: string; mimeType: string };',
     "type McpToolOutput = { content: (TextPart | ImagePart)[]; isError?: boolean };",
@@ -131,7 +131,7 @@ function hostFixtureSource(replacements: Map<string, string>): string {
     "  return schema;",
     "}",
     "function toolWireSchema(tool: Tool): unknown {",
-    "  return tool.inputSchema;",
+    "  return tool.parameters;",
     "}",
     "function errorOutput(text: string): McpToolOutput {",
     '  return { content: [{ type: "text", text: text }], isError: true };',
@@ -192,7 +192,8 @@ function hostFixtureSource(replacements: Map<string, string>): string {
     "    const step = { writer: this.writer, messages: this.messages };",
     required("inbound-canonical-validation"),
     "    if (!validation.success) return errorOutput(describeToolArguments(tool, args, validation));",
-    "    if (!isRecord(canonicalArgs)) return errorOutput(describeToolArguments(tool, canonicalArgs));",
+    "    if (!isRecord(args)) return errorOutput(describeToolArguments(tool, args));",
+    required("inbound-canonical-args-narrowing"),
     '    const id = "agy_" + crypto.randomUUID().replaceAll("-", "");',
     "    const result = Promise.withResolvers<McpToolOutput>();",
     "    const self = this;",
@@ -247,7 +248,7 @@ function canonicalTools(): ToolInput[] {
   return ALIAS_RULES.map((rule) => ({
     name: rule.toolName,
     description: rule.description,
-    inputSchema: CANONICAL_SCHEMAS[rule.toolName],
+    parameters: CANONICAL_SCHEMAS[rule.toolName],
   }));
 }
 
