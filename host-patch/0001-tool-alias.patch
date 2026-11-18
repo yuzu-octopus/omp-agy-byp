@@ -48,7 +48,7 @@
         "\t\tconst mappedCall = (globalThis as Record<string, ((name: string, args: unknown) => { toolName: string; args: unknown } | undefined) | undefined>).__ompAgBypReverseToolCall?.(name, args);",
         "\t\tconst canonicalName = mappedCall?.toolName ?? name;",
         "\t\tconst canonicalArgs = mappedCall?.args ?? args;",
-        "\t\tconst validation = validateJsonSchemaValue(tool.inputSchema, args);"
+        "\t\tconst validation = validateJsonSchemaValue(tool.inputSchema, canonicalArgs);"
       ]
     },
     {
