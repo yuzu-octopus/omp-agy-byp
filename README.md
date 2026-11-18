@@ -90,12 +90,14 @@ Only six omp tools are mapped, using Antigravity's published tool names (officia
 
 | omp tool | official Antigravity hook name | mapped keys |
 | --- | --- | --- |
-| `read` | `view_file` | `path -> AbsolutePath`, `offset -> StartLine` |
-| `write` | `write_to_file` | `path -> TargetFile`, `content -> CodeContent`, `overwrite -> Overwrite`, `description -> Description` |
+| `read` | `view_file` | `path -> AbsolutePath` |
+| `write` | `write_to_file` | `path -> TargetFile`, `content -> CodeContent` |
 | `edit` | `replace_file_content` | `path -> TargetFile`, `old_string -> TargetContent`, `new_string -> ReplacementContent` |
 | `grep` | `grep_search` | `pattern -> Query`, `path -> SearchPath`, constant `IsRegex: true` |
-| `glob` | `find_by_name` | `pattern -> Pattern`, `path -> SearchDirectory` |
-| `bash` | `run_command` | `command -> CommandLine`, `cwd -> Cwd`, default `WaitMsBeforeAsync: 5000` |
+| `glob` | `find_by_name` | `path -> Pattern` |
+| `bash` | `run_command` | `command -> CommandLine`, `cwd -> Cwd` |
+
+Only keys omp actually declares are emitted: the patched host validates projected args against closed (`additionalProperties: false`) schemas. Native-only alias keys with no omp counterpart (`StartLine`, `EndLine`, `SearchDirectory`, `Overwrite`, `Description`, `WaitMsBeforeAsync`) are accepted by the alias-facing `inputSchema` but are intentionally dropped rather than forwarded. `find_by_name` folds `Pattern` into the glob path selector: omp's `path` is projected into `Pattern`, and a separate `SearchDirectory` is not composed.
 
 Relative paths are resolved to absolute before projection. No other omp tool is touched. The reverse path maps an incoming alias call back to the canonical omp tool name and canonical arguments before the host validates or records it, so tool ids, approvals and digests stay canonical.
 
