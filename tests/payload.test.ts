@@ -2,6 +2,13 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_CONFIG } from "../src/config";
 import { scrubContextMessages, scrubPayload } from "../src/payload";
+type Part = {
+  text?: string;
+  functionCall?: { id: string; name: string; args: Record<string, unknown> };
+  functionResponse?: { id: string; name: string; response: Record<string, unknown> };
+};
+
+type ContentPart = { type: string; text?: string };
 
 function ccaPayload() {
   return {
@@ -11,18 +18,18 @@ function ccaPayload() {
     request: {
       sessionId: "-123",
       labels: { cascade_id: "a", model_enum: "gemini-3.1-pro", request_id: "t-0", trajectory_id: "t" },
-      systemInstruction: { role: "user", parts: [{ text: "⁂ Role\nYou are omp's trusted coding assistant." }] },
+      systemInstruction: { role: "user", parts: [{ text: "⁂ Role\nYou are omp's trusted coding assistant." }] as Part[] },
       contents: [
         {
           role: "user",
           parts: [
             { text: "# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...\nhello" },
             { functionCall: { id: "call-1", name: "read", args: { path: "x" } } },
-          ],
+          ] as Part[],
         },
         {
           role: "functionResponse",
-          parts: [{ functionResponse: { id: "call-1", name: "read", response: { output: "ok" } } }],
+          parts: [{ functionResponse: { id: "call-1", name: "read", response: { output: "ok" } } }] as Part[],
         },
       ],
       tools: [{ functionDeclarations: [{ name: "read", description: "⁂ Role\nYou are omp's trusted coding assistant. — read a file" }] }],
@@ -87,8 +94,10 @@ test("context messages scrub text but keep tool-call ids and names", () => {
     },
   ];
   const out = scrubContextMessages(messages, { ...DEFAULT_CONFIG, mode: "generic" });
-  expect(out[0].content[0].text).toBe("⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.\nhi");
-  expect(out[1].content[0].text).toBe("# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nok");
+  const firstPart = (out[0].content as ContentPart[])[0];
+  const secondPart = (out[1].content as ContentPart[])[0];
+  expect(firstPart.text).toBe("⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.\nhi");
+  expect(secondPart.text).toBe("# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nok");
   expect(out[1].toolCallId).toBe("call-9");
   expect(out[1].toolName).toBe("read");
 });
