@@ -19,13 +19,11 @@ export const HOST_PATCH_ANCHORS = [
   "__ompAgBypReverseToolCall",
   "__ompAgBypProjectResult",
 ] as const;
-
-const DECLARED_ANCHORS = [
-  "__ompAgBypSetToolAliasProvider",
-  "__ompAgBypReverseToolCall",
-  "__ompAgBypProjectResult",
+const HOOK_SCOPES = [
+  { anchor: "__ompAgBypSetToolAliasProvider", owner: undefined },
+  { anchor: "__ompAgBypReverseToolCall", owner: "async #onToolCall(" },
+  { anchor: "__ompAgBypProjectResult", owner: "function toMcpOutput(" },
 ] as const;
-
 export function resolveHostFile(hostRoot: string): string | undefined {
   for (const relative of HOST_CANDIDATES) {
     const candidate = join(hostRoot, relative);
@@ -96,13 +94,12 @@ export function checkHostPatch(hostRoot: string): HostPatchResult {
     return { status: "drifted", reason: "__ompAgBypProjectTool is outside toMcpTool" };
   }
 
-  for (const anchor of DECLARED_ANCHORS) {
-    const declarationAt = text.indexOf(`function ${anchor}`);
-    if (declarationAt === -1) {
-      return { status: "drifted", reason: `${anchor} is not a function declaration` };
-    }
-    if (braceDepthAt(text, declarationAt) !== 0) {
-      return { status: "drifted", reason: `${anchor} is nested in another function body` };
+  for (const { anchor, owner } of HOOK_SCOPES) {
+    const anchorAt = text.indexOf(anchor);
+    if (braceDepthAt(text, anchorAt) === 0) continue;
+    const ownerBody = owner ? functionBody(text, owner) : undefined;
+    if (!ownerBody || anchorAt < ownerBody.start || anchorAt >= ownerBody.end) {
+      return { status: "drifted", reason: `${anchor} is outside its expected host seam` };
     }
   }
 

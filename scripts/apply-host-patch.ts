@@ -119,21 +119,22 @@ export function applyHostPatch(
   hostRoot: string,
   options: { patchPath?: string; check?: boolean } = {},
 ): ApplyResult {
+  const patch = loadPatch(options.patchPath ?? DEFAULT_PATCH_PATH);
+  const targetPath = join(hostRoot, patch.target);
   if (options.check) {
+    if (existsSync(targetPath)) verifyHostVersion(hostRoot, targetPath);
     const { status, reason } = checkHostPatch(hostRoot);
     return { action: "checked", status, reason, files: [] };
   }
 
-  const patch = loadPatch(options.patchPath ?? DEFAULT_PATCH_PATH);
+  if (!existsSync(targetPath)) throw new HostPatchError(`target not found: ${targetPath}`);
+  verifyHostVersion(hostRoot, targetPath);
+
   const state = checkHostPatch(hostRoot);
   if (state.status === "ok") return { action: "already-applied", status: "ok", files: [] };
   if (state.status === "drifted") {
     throw new HostPatchError(`host patch is drifted: ${state.reason ?? "unknown reason"}`);
   }
-
-  const targetPath = join(hostRoot, patch.target);
-  if (!existsSync(targetPath)) throw new HostPatchError(`target not found: ${targetPath}`);
-  verifyHostVersion(hostRoot, targetPath);
 
   const original = readFileSync(targetPath, "utf8");
   let updated = original;
