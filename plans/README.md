@@ -11,6 +11,9 @@ Audit fixes for all four plans were applied on 2026-11-18 and verified with docs
 | 002  | Align spec and plan contracts | P1 | M | — | DONE |
 | 003  | Clean evidence docs | P2 | M | — | DONE |
 | 004  | Harden implementation plan tests | P1 | M | 002 (same plan file) | DONE |
+| 005  | Fix signature evidence audit findings | P1 | M | — | DONE |
+| 006  | Fix signature spec scope | P1 | S | — | DONE |
+| 007  | Fix signature plan tasks | P1 | M | 005, 006 | DONE |
 ## Dependency notes
 
 - 002 and 004 edit the same implementation-plan file. Run them sequentially in one executor or finish 002 before 004 to avoid conflicting replacements.
