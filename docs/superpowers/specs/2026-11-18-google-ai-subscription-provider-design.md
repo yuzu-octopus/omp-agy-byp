@@ -2,6 +2,8 @@
 
 **Date:** 2026-11-18
 
+> **Historical design draft, not an installation guide.** omp already ships `antigravity-cli`. The extension described below does not exist. Keep the built-in provider, its login flow, and the host's provider policy unchanged when evaluating ordinary ACP use.
+
 ## Intent
 
 Let an omp user run models against their own Google AI Pro/Ultra subscription while keeping omp's native handling of CLI execution, OAuth, credentials, headers and request envelope. The plugin adds only improved content shaping: it rewrites omp-specific strings in the system prompt, context and tool descriptions so the conversation reaching the model reads like a generic client. It never registers a provider, never handles tokens, never relays traffic, and never changes transport identity.
