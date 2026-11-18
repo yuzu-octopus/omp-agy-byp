@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ALIAS_RULES, createToolAliasProvider, type ToolAliasProvider } from "../src/tool-alias";
+import { normalizeSchemaForMCP, toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 
 type PatchEdit = { id: string; replacement: string[] };
 type ToolInput = { name: string; description: string; parameters: Record<string, unknown> };
@@ -126,8 +127,12 @@ function hostFixtureSource(replacements: Map<string, string>): string {
     "  }",
     "  for (const [key, value] of Object.entries(args)) {",
     "    const spec = properties[key];",
-    "    if (!isRecord(spec)) continue;",
+    "    if (!isRecord(spec)) {",
+    '      if (schema.additionalProperties === false) issues.push(key + " is not declared");',
+    "      continue;",
+    "    }",
     '    if (spec.type === "string" && typeof value !== "string") issues.push(key + " must be a string");',
+    '    if (spec.type === "number" && typeof value !== "number") issues.push(key + " must be a number");',
     '    if (spec.type === "integer" && !Number.isInteger(value)) issues.push(key + " must be an integer");',
     '    if (spec.type === "boolean" && typeof value !== "boolean") issues.push(key + " must be a boolean");',
     '    if (Object.hasOwn(spec, "const") && value !== spec.const) issues.push(key + " has the wrong constant");',
@@ -198,7 +203,7 @@ function hostFixtureSource(replacements: Map<string, string>): string {
     '    if (!tool) return errorOutput("Unknown tool: " + name);',
     "    const step = { writer: this.writer, messages: this.messages };",
     required("inbound-canonical-validation"),
-    "    if (!validation.success) return errorOutput(describeToolArguments(tool, args, validation));",
+    required("inbound-canonical-diagnostics"),
     "    if (!isRecord(args)) return errorOutput(describeToolArguments(tool, args));",
     required("inbound-canonical-args-narrowing"),
     '    const id = "agy_" + crypto.randomUUID().replaceAll("-", "");',
@@ -235,20 +240,70 @@ function hostFixtureSource(replacements: Map<string, string>): string {
   ].join("\n");
 }
 
-const CANONICAL_SCHEMAS: Record<string, Record<string, unknown>> = {
-  read: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+// Real installed omp 18.22.2 builtin parameters. toolWireSchema closes declared
+// objects, so canonical args are checked under strict additionalProperties:false.
+const INSTALLED_TOOL_PARAMETERS: Record<string, Record<string, unknown>> = {
+  read: {
+    type: "object",
+    properties: { path: { type: "string" }, offset: { type: "number" }, limit: { type: "number" } },
+    required: ["path"],
+    additionalProperties: false,
+  },
   write: {
     type: "object",
     properties: { path: { type: "string" }, content: { type: "string" } },
     required: ["path", "content"],
+    additionalProperties: false,
   },
-  edit: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
-  grep: { type: "object", properties: { pattern: { type: "string" } }, required: ["pattern"] },
-  glob: { type: "object", properties: { pattern: { type: "string" } }, required: ["pattern"] },
-  bash: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+  edit: {
+    type: "object",
+    properties: {
+      path: { type: "string" },
+      old_string: { type: "string" },
+      new_string: { type: "string" },
+    },
+    required: ["path", "old_string", "new_string"],
+    additionalProperties: false,
+  },
+  grep: {
+    type: "object",
+    properties: { pattern: { type: "string" }, path: { type: "string" } },
+    required: ["pattern"],
+    additionalProperties: false,
+  },
+  glob: {
+    type: "object",
+    properties: {
+      path: { type: "string" },
+      hidden: { type: "boolean" },
+      gitignore: { type: "boolean" },
+      limit: { type: "number" },
+    },
+    additionalProperties: false,
+  },
+  bash: {
+    type: "object",
+    properties: {
+      command: { type: "string" },
+      timeout: { type: "number" },
+      cwd: { type: "string" },
+      pty: { type: "boolean" },
+      async: { type: "boolean" },
+    },
+    required: ["command"],
+    additionalProperties: false,
+  },
 };
+const CANONICAL_SCHEMAS: Record<string, Record<string, unknown>> = Object.fromEntries(
+  Object.entries(INSTALLED_TOOL_PARAMETERS).map(([name, parameters]) => {
+    const tool = { name, description: "", parameters } as unknown as Parameters<
+      typeof toolWireSchema
+    >[0];
+    return [name, normalizeSchemaForMCP(toolWireSchema(tool)) as Record<string, unknown>];
+  }),
+);
 const ALIAS_ARGS = { AbsolutePath: "/tmp/alias-adapter-fixture.txt", StartLine: 4, Extra: "drop" };
-const CANONICAL_ARGS = { path: "/tmp/alias-adapter-fixture.txt", offset: 4 };
+const CANONICAL_ARGS = { path: "/tmp/alias-adapter-fixture.txt" };
 const RESULT_TEXT = "canonical text";
 
 function canonicalTools(): ToolInput[] {
@@ -269,8 +324,13 @@ function newHost(): FixtureHost {
   return new fixture.FixtureHost(advertisedTools(), [{ role: "user", content: "fixture prompt" }]);
 }
 
-async function dispatch(host: FixtureHost, args: unknown, resultToolName = "view_file") {
-  const call = host.onToolCall("view_file", args);
+async function dispatch(
+  host: FixtureHost,
+  args: unknown,
+  aliasName = "view_file",
+  resultToolName = aliasName,
+) {
+  const call = host.onToolCall(aliasName, args);
   const settled = host.settleResult({
     toolResult: {
       content: [{ type: "text", text: RESULT_TEXT }],
@@ -411,4 +471,46 @@ test("unknown alias is rejected without emitting a toolCall", async () => {
   expect(JSON.stringify(output.content)).toContain("Unknown tool: not_an_alias");
   expect(host.writer.toolCalls).toHaveLength(0);
   expect(host.lastDigest).toBeUndefined();
+});
+
+test("fixture validator rejects undeclared canonical keys under additionalProperties:false", () => {
+  const host = newHost();
+  expect(host.validate(CANONICAL_SCHEMAS.glob, { path: "/tmp", pattern: "*.ts" }).success).toBe(
+    false,
+  );
+  expect(host.validate(CANONICAL_SCHEMAS.read, { path: "/tmp", offset: 4 }).success).toBe(true);
+});
+
+test("every alias dispatches canonical args accepted by the strict fixture validator", async () => {
+  const aliasArgs: Record<string, Record<string, unknown>> = {
+    view_file: { AbsolutePath: "/tmp/f.txt", StartLine: 4 },
+    write_to_file: { TargetFile: "/tmp/f.txt", CodeContent: "x", Overwrite: true },
+    replace_file_content: { TargetFile: "/tmp/f.ts", TargetContent: "a", ReplacementContent: "b" },
+    grep_search: { Query: "foo", SearchPath: "relative/dir" },
+    find_by_name: { Pattern: "*.ts", SearchDirectory: "relative/dir" },
+    run_command: { CommandLine: "ls", Cwd: "/tmp", WaitMsBeforeAsync: 1200 },
+  };
+  for (const rule of ALIAS_RULES) {
+    const host = newHost();
+    fixture.validationCalls.length = 0;
+    const args = aliasArgs[rule.aliasName];
+    if (!args) throw new Error(`no fixture args for ${rule.aliasName}`);
+    const { output } = await dispatch(host, args, rule.aliasName);
+    expect(output.isError, `${rule.aliasName}: ${JSON.stringify(output.content)}`).toBe(false);
+    expect(host.writer.toolCalls).toHaveLength(1);
+    expect(host.writer.toolCalls[0]?.name).toBe(rule.toolName);
+    expect(fixture.validationCalls[0]).toEqual(host.writer.toolCalls[0]?.arguments);
+  }
+});
+
+test("validation diagnostics describe canonical args, not alias-shaped args", async () => {
+  const host = newHost();
+  const output = await host.onToolCall("write_to_file", {
+    TargetFile: "/tmp/f.txt",
+    CodeContent: 42,
+  });
+  expect(output.isError).toBe(true);
+  const text = JSON.stringify(output.content);
+  expect(text).toContain("content");
+  expect(text).not.toContain("CodeContent");
 });

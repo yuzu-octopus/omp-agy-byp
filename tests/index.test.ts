@@ -352,7 +352,7 @@ test("alias resolvers are inert when off, native, or patch is not ok", () => {
       expect(outbound).toMatchObject({ name: "run_command" });
       expect(inbound).toEqual({
         toolName: "bash",
-        args: { command: "ls", waitMsBeforeAsync: 5000 },
+        args: { command: "ls" },
       });
       expect(result).toEqual({ content: [{ type: "text", text: "done" }] });
     } else {
@@ -424,4 +424,38 @@ test("toggle sets a pending alias state cleared at before_agent_start", () => {
   commands["agy-byp"]!("status", commandCtx(notices));
   expect(notices.at(-1)).toContain("alias: off");
   expect(provider.resolveOutbound({ name: "bash" })).toBeUndefined();
+});
+
+test("alias pending is not armed when the patch is missing or mode is native", () => {
+  for (const [patch, mode] of [
+    ["missing", "generic"],
+    ["drifted", "generic"],
+    ["ok", "native"],
+  ] as const) {
+    const state: { enabled: boolean; aliasPending?: boolean } = { enabled: false };
+    const commands: Record<string, CommandHandler> = {};
+    const notices: string[] = [];
+    attach({}, commands, depsFor(state, patch, mode));
+    commands["agy-byp"]!("on", commandCtx(notices));
+    expect(state.aliasPending ?? false, `${patch}/${mode}`).toBe(false);
+    commands["agy-byp"]!("status", commandCtx(notices));
+    expect(notices.at(-1)).not.toContain("alias changes take effect");
+  }
+});
+
+test("redundant on or off does not re-arm alias pending", () => {
+  const hooks: Record<string, Hook> = {};
+  const commands: Record<string, CommandHandler> = {};
+  const state: { enabled: boolean; aliasPending?: boolean } = { enabled: true };
+  attach(hooks, commands, depsFor(state, "ok"));
+  hooks.before_agent_start!(
+    { systemPrompt: ["You are omp's trusted coding assistant."] },
+    requestCtx("antigravity-cli"),
+  );
+  expect(state.aliasPending).toBe(false);
+  commands["agy-byp"]!("on", commandCtx());
+  expect(state.aliasPending).toBe(false);
+  const notices: string[] = [];
+  commands["agy-byp"]!("status", commandCtx(notices));
+  expect(notices.at(-1)).toContain("alias: active");
 });

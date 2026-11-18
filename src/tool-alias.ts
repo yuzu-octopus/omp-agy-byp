@@ -29,9 +29,11 @@ export type AliasRule = {
   argumentMap: readonly ArgumentMapping[];
 };
 
-// Required arrays are deliberately conservative: hook docs publish key names,
-// not the native model-facing JSON schemas, so only keys omp always supplies
-// (plus synthesized constant/default values) are asserted as required.
+// Alias schemas mirror Antigravity's native hook keys. Canonical keys must be a
+// subset of the pinned omp 18.22.2 tool parameters: the patched host validates
+// emitted args against closed (additionalProperties:false) schemas. Native-only
+// keys with no declared counterpart are folded into a selector or dropped.
+// Required arrays stay conservative: only keys omp always supplies are asserted.
 export const ALIAS_RULES: readonly AliasRule[] = [
   {
     toolName: "read",
@@ -50,10 +52,7 @@ export const ALIAS_RULES: readonly AliasRule[] = [
       },
       required: ["AbsolutePath"],
     },
-    argumentMap: [
-      { kind: "field", source: "path", target: "AbsolutePath", resolveAbsolute: true },
-      { kind: "field", source: "offset", target: "StartLine" },
-    ],
+    argumentMap: [{ kind: "field", source: "path", target: "AbsolutePath", resolveAbsolute: true }],
   },
   {
     toolName: "write",
@@ -74,8 +73,6 @@ export const ALIAS_RULES: readonly AliasRule[] = [
     argumentMap: [
       { kind: "field", source: "path", target: "TargetFile", resolveAbsolute: true },
       { kind: "field", source: "content", target: "CodeContent" },
-      { kind: "field", source: "overwrite", target: "Overwrite" },
-      { kind: "field", source: "description", target: "Description" },
     ],
   },
   {
@@ -140,12 +137,9 @@ export const ALIAS_RULES: readonly AliasRule[] = [
         FullPath: { type: "boolean" },
         MaxDepth: { type: "integer" },
       },
-      required: ["SearchDirectory", "Pattern"],
+      required: ["Pattern"],
     },
-    argumentMap: [
-      { kind: "field", source: "pattern", target: "Pattern" },
-      { kind: "field", source: "path", target: "SearchDirectory", resolveAbsolute: true },
-    ],
+    argumentMap: [{ kind: "field", source: "path", target: "Pattern" }],
   },
   {
     toolName: "bash",
@@ -158,12 +152,11 @@ export const ALIAS_RULES: readonly AliasRule[] = [
         Cwd: { type: "string", description: "Working directory for the command." },
         WaitMsBeforeAsync: { type: "integer", default: 5000 },
       },
-      required: ["CommandLine", "Cwd", "WaitMsBeforeAsync"],
+      required: ["CommandLine", "Cwd"],
     },
     argumentMap: [
       { kind: "field", source: "command", target: "CommandLine" },
       { kind: "field", source: "cwd", target: "Cwd" },
-      { kind: "default", source: "waitMsBeforeAsync", target: "WaitMsBeforeAsync", value: 5000 },
     ],
   },
 ];
@@ -209,7 +202,7 @@ export function createToolAliasProvider(options: ToolAliasProviderOptions): Tool
       return {
         name: rule.aliasName,
         description: rule.description,
-        inputSchema: rule.inputSchema,
+        inputSchema: structuredClone(rule.inputSchema),
       };
     },
 

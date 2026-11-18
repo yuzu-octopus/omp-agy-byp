@@ -1,8 +1,7 @@
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkHostPatch, type HostPatchStatus } from "./check-host-patch";
+import { checkHostPatch, resolveRuntimeHostRoot, type HostPatchStatus } from "../src/patch-status";
 
 export const PINNED_HOST_VERSION = "18.22.2";
 
@@ -48,7 +47,9 @@ function countOccurrences(text: string, needle: string): number {
 function loadPatch(patchPath: string): PatchFile {
   const raw = JSON.parse(readFileSync(patchPath, "utf8"));
   if (raw.hostVersion !== PINNED_HOST_VERSION) {
-    throw new HostPatchError(`patch pins ${String(raw.hostVersion)}, expected ${PINNED_HOST_VERSION}`);
+    throw new HostPatchError(
+      `patch pins ${String(raw.hostVersion)}, expected ${PINNED_HOST_VERSION}`,
+    );
   }
   if (typeof raw.target !== "string" || !Array.isArray(raw.edits)) {
     throw new HostPatchError("malformed patch file");
@@ -81,40 +82,6 @@ function verifyHostVersion(hostRoot: string, hostFile: string): void {
   throw new HostPatchError(`cannot verify host version ${PINNED_HOST_VERSION} under ${hostRoot}`);
 }
 
-function packageRoot(entry: string, packageName: string): string | undefined {
-  let dir = dirname(entry);
-  while (dir !== dirname(dir)) {
-    const manifest = join(dir, "package.json");
-    if (existsSync(manifest)) {
-      try {
-        const pkg = JSON.parse(readFileSync(manifest, "utf8"));
-        if (pkg.name === packageName) return dir;
-      } catch {
-        // Keep walking: a broken manifest is not this package.
-      }
-    }
-    dir = dirname(dir);
-  }
-  return undefined;
-}
-
-function resolveRuntimeHostRoot(): string | undefined {
-  const require = createRequire(import.meta.url);
-  try {
-    const aiRoot = packageRoot(require.resolve("@oh-my-pi/pi-ai"), "@oh-my-pi/pi-ai");
-    if (aiRoot) return aiRoot;
-  } catch {
-    // Try the coding-agent package next.
-  }
-  try {
-    const agentRoot = packageRoot(require.resolve("@oh-my-pi/pi-coding-agent"), "@oh-my-pi/pi-coding-agent");
-    if (agentRoot) return dirname(agentRoot);
-  } catch {
-    // Caller must pass --host explicitly.
-  }
-  return undefined;
-}
-
 export function applyHostPatch(
   hostRoot: string,
   options: { patchPath?: string; check?: boolean } = {},
@@ -142,7 +109,9 @@ export function applyHostPatch(
     const anchor = edit.anchor.join("\n");
     const occurrences = countOccurrences(updated, anchor);
     if (occurrences !== 1) {
-      throw new HostPatchError(`edit ${edit.id}: anchor occurs ${occurrences} times (expected 1); no fuzzy patching`);
+      throw new HostPatchError(
+        `edit ${edit.id}: anchor occurs ${occurrences} times (expected 1); no fuzzy patching`,
+      );
     }
     updated = updated.replace(anchor, edit.replacement.join("\n"));
   }

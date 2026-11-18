@@ -6,9 +6,79 @@ import {
   validateAliasRules,
   type AliasRule,
 } from "../src/tool-alias";
+import {
+  normalizeSchemaForMCP,
+  toolWireSchema,
+  validateJsonSchemaValue,
+} from "@oh-my-pi/pi-ai/utils/schema";
 
 function active() {
   return createToolAliasProvider({ enabled: () => true, mode: () => "generic" });
+}
+
+// Plain-JSON mirrors of the installed omp 18.22.2 builtin tool parameters.
+// additionalProperties:false matches the closed schemas the patched host derives
+// from ArkType via toolWireSchema/normalizeSchemaForMCP.
+const INSTALLED_TOOL_PARAMETERS: Record<string, Record<string, unknown>> = {
+  read: {
+    type: "object",
+    properties: { path: { type: "string" }, offset: { type: "number" }, limit: { type: "number" } },
+    required: ["path"],
+    additionalProperties: false,
+  },
+  write: {
+    type: "object",
+    properties: { path: { type: "string" }, content: { type: "string" } },
+    required: ["path", "content"],
+    additionalProperties: false,
+  },
+  edit: {
+    type: "object",
+    properties: {
+      path: { type: "string" },
+      old_string: { type: "string" },
+      new_string: { type: "string" },
+    },
+    required: ["path", "old_string", "new_string"],
+    additionalProperties: false,
+  },
+  grep: {
+    type: "object",
+    properties: { pattern: { type: "string" }, path: { type: "string" } },
+    required: ["pattern"],
+    additionalProperties: false,
+  },
+  glob: {
+    type: "object",
+    properties: {
+      path: { type: "string" },
+      hidden: { type: "boolean" },
+      gitignore: { type: "boolean" },
+      limit: { type: "number" },
+    },
+    additionalProperties: false,
+  },
+  bash: {
+    type: "object",
+    properties: {
+      command: { type: "string" },
+      timeout: { type: "number" },
+      cwd: { type: "string" },
+      pty: { type: "boolean" },
+      async: { type: "boolean" },
+    },
+    required: ["command"],
+    additionalProperties: false,
+  },
+};
+
+function installedSchema(toolName: string): Record<string, unknown> {
+  const parameters = INSTALLED_TOOL_PARAMETERS[toolName];
+  if (!parameters) throw new Error(`no installed schema for ${toolName}`);
+  const tool = { name: toolName, description: "", parameters } as unknown as Parameters<
+    typeof toolWireSchema
+  >[0];
+  return normalizeSchemaForMCP(toolWireSchema(tool)) as Record<string, unknown>;
 }
 
 const EXPECTED_ALIASES = [
@@ -157,16 +227,16 @@ test("schemas expose documented hook keys and conservative required arrays", () 
       "MaxDepth",
     ]),
   );
-  expect(requiredOf(ruleFor("find_by_name"))).toEqual(["SearchDirectory", "Pattern"]);
+  expect(requiredOf(ruleFor("find_by_name"))).toEqual(["Pattern"]);
 
   expect(Object.keys(propsOf(ruleFor("run_command")))).toEqual(
     expect.arrayContaining(["CommandLine", "Cwd", "WaitMsBeforeAsync"]),
   );
   expect(propsOf(ruleFor("run_command")).WaitMsBeforeAsync?.default).toBe(5000);
-  expect(requiredOf(ruleFor("run_command"))).toEqual(["CommandLine", "Cwd", "WaitMsBeforeAsync"]);
+  expect(requiredOf(ruleFor("run_command"))).toEqual(["CommandLine", "Cwd"]);
 });
 
-test("inbound view_file maps path/offset and resolves AbsolutePath to absolute", () => {
+test("inbound view_file maps AbsolutePath only and drops native-only StartLine", () => {
   const rel = "relative/dir/file.txt";
   expect(
     active().resolveInbound("view_file", {
@@ -175,10 +245,10 @@ test("inbound view_file maps path/offset and resolves AbsolutePath to absolute",
       EndLine: 9,
       Extra: "drop me",
     }),
-  ).toEqual({ toolName: "read", args: { path: resolveAbsolute(rel), offset: 4 } });
+  ).toEqual({ toolName: "read", args: { path: resolveAbsolute(rel) } });
 });
 
-test("inbound write_to_file maps content/overwrite/description and resolves TargetFile", () => {
+test("inbound write_to_file maps path/content and drops Overwrite/Description", () => {
   const rel = "relative/out.txt";
   expect(
     active().resolveInbound("write_to_file", {
@@ -190,7 +260,7 @@ test("inbound write_to_file maps content/overwrite/description and resolves Targ
     }),
   ).toEqual({
     toolName: "write",
-    args: { path: resolveAbsolute(rel), content: "hello", overwrite: true, description: "d" },
+    args: { path: resolveAbsolute(rel), content: "hello" },
   });
 });
 
@@ -222,18 +292,17 @@ test("inbound grep_search maps Query/SearchPath without path resolution and drop
   ).toEqual({ toolName: "grep", args: { pattern: "foo", path: rel } });
 });
 
-test("inbound find_by_name maps Pattern/SearchDirectory and resolves SearchDirectory", () => {
-  const rel = "relative/dir";
+test("inbound find_by_name folds Pattern into the glob path selector", () => {
   expect(
     active().resolveInbound("find_by_name", {
       Pattern: "*.ts",
-      SearchDirectory: rel,
+      SearchDirectory: "relative/dir",
       Type: "file",
     }),
-  ).toEqual({ toolName: "glob", args: { pattern: "*.ts", path: resolveAbsolute(rel) } });
+  ).toEqual({ toolName: "glob", args: { path: "*.ts" } });
 });
 
-test("inbound run_command maps command/cwd and defaults WaitMsBeforeAsync to 5000", () => {
+test("inbound run_command maps command/cwd and drops WaitMsBeforeAsync", () => {
   const provider = active();
   expect(
     provider.resolveInbound("run_command", {
@@ -241,14 +310,67 @@ test("inbound run_command maps command/cwd and defaults WaitMsBeforeAsync to 500
       Cwd: "/tmp",
       WaitMsBeforeAsync: 1200,
     }),
-  ).toEqual({
-    toolName: "bash",
-    args: { command: "ls", cwd: "/tmp", waitMsBeforeAsync: 1200 },
-  });
+  ).toEqual({ toolName: "bash", args: { command: "ls", cwd: "/tmp" } });
   expect(provider.resolveInbound("run_command", { CommandLine: "ls", Cwd: "/tmp" })).toEqual({
     toolName: "bash",
-    args: { command: "ls", cwd: "/tmp", waitMsBeforeAsync: 5000 },
+    args: { command: "ls", cwd: "/tmp" },
   });
+});
+
+test("inbound canonical args pass installed omp 18.22.2 schema validation", () => {
+  const provider = active();
+  const aliasArgs: Record<string, Record<string, unknown>> = {
+    view_file: { AbsolutePath: "/tmp/f.txt", StartLine: 4 },
+    write_to_file: {
+      TargetFile: "/tmp/f.txt",
+      CodeContent: "x",
+      Overwrite: true,
+      Description: "d",
+    },
+    replace_file_content: {
+      TargetFile: "/tmp/f.ts",
+      TargetContent: "a",
+      ReplacementContent: "b",
+    },
+    grep_search: { Query: "foo", SearchPath: "relative/dir" },
+    find_by_name: { Pattern: "*.ts", SearchDirectory: "relative/dir" },
+    run_command: { CommandLine: "ls", Cwd: "/tmp", WaitMsBeforeAsync: 1200 },
+  };
+  for (const rule of ALIAS_RULES) {
+    const mapped = provider.resolveInbound(rule.aliasName, aliasArgs[rule.aliasName]);
+    if (!mapped) throw new Error(`${rule.aliasName} did not map`);
+    expect(mapped.toolName).toBe(rule.toolName);
+    const schema = installedSchema(rule.toolName);
+    const validation = validateJsonSchemaValue(schema, mapped.args);
+    expect(
+      validation.success,
+      `${rule.aliasName} -> ${rule.toolName}: ${JSON.stringify(validation.issues)}`,
+    ).toBe(true);
+    const declared = Object.keys((schema.properties ?? {}) as Record<string, unknown>);
+    for (const key of Object.keys(mapped.args as Record<string, unknown>)) {
+      expect(declared, `${rule.aliasName} emitted undeclared canonical key ${key}`).toContain(key);
+    }
+  }
+});
+
+test("old alias-shaped canonical keys are rejected by installed schemas", () => {
+  expect(
+    validateJsonSchemaValue(installedSchema("write"), {
+      path: "/x",
+      content: "y",
+      overwrite: true,
+    }).success,
+  ).toBe(false);
+  expect(
+    validateJsonSchemaValue(installedSchema("glob"), { path: "/tmp", pattern: "*.ts" }).success,
+  ).toBe(false);
+  expect(
+    validateJsonSchemaValue(installedSchema("bash"), {
+      command: "ls",
+      cwd: "/tmp",
+      waitMsBeforeAsync: 1200,
+    }).success,
+  ).toBe(false);
 });
 
 test("inbound rejects unknown aliases and non-object args without throwing", () => {

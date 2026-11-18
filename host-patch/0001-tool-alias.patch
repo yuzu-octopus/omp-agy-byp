@@ -26,6 +26,7 @@
         "}",
         "agBypGlobal.__ompAgBypSetToolAliasProvider = (provider: AgBypAliasProvider): void => {",
         "\tagBypGlobal[agBypProviderSlot] = provider;",
+        "\tagBypCanonicalTools.clear();",
         "\tagBypGlobal[agBypHookName(\"ProjectTool\")] = (tool: Tool) => provider.resolveOutbound?.(tool);",
         "\tagBypGlobal[agBypHookName(\"ReverseToolCall\")] = (name: string, args: unknown) => provider.resolveInbound?.(name, args);",
         "\tagBypGlobal[agBypHookName(\"ProjectResult\")] = (toolName: string, result: McpToolOutput) =>",
@@ -61,6 +62,11 @@
       "id": "inbound-canonical-validation",
       "anchor": ["\t\tconst validation = validateJsonSchemaValue(tool.inputSchema, args);"],
       "replacement": ["\t\tconst validation = validateJsonSchemaValue(tool.inputSchema, canonicalArgs);"]
+    },
+    {
+      "id": "inbound-canonical-diagnostics",
+      "anchor": ["\t\tif (!validation.success) return errorOutput(describeToolArguments(tool, args, validation));"],
+      "replacement": ["\t\tif (!validation.success) return errorOutput(describeToolArguments(tool, canonicalArgs, validation));"]
     },
     {
       "id": "inbound-canonical-args-narrowing",

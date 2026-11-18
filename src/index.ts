@@ -95,8 +95,10 @@ export function createExtension({
         const action = args.trim().toLowerCase().split(/\s+/, 1)[0] ?? "";
 
         if (action === "on") {
-          state.enabled = true;
-          state.aliasPending = true;
+          if (!state.enabled) {
+            state.enabled = true;
+            if (patch.status === "ok" && config.mode !== "native") state.aliasPending = true;
+          }
           if (config.unpauseFallback) unpause([FALLBACK_PROVIDER_ID]);
           ctx.ui.notify(
             `agy-byp: scrubbing on (mode=${config.mode}, unpauseFallback=${config.unpauseFallback}).`,
@@ -105,8 +107,10 @@ export function createExtension({
         }
 
         if (action === "off") {
-          state.enabled = false;
-          state.aliasPending = true;
+          if (state.enabled) {
+            state.enabled = false;
+            if (patch.status === "ok" && config.mode !== "native") state.aliasPending = true;
+          }
           ctx.ui.notify("agy-byp: scrubbing off (no pause or provider changes made).");
           return;
         }
