@@ -8,6 +8,7 @@ import {
   TOGGLE_COMMAND,
 } from "./ids";
 import { scrubContextMessages, scrubPayload, type Msg } from "./payload";
+import { isSubscriptionProvider } from "./providers";
 import { scrubSystemPrompt } from "./system-prompt";
 
 export type ToggleState = { enabled: boolean };
@@ -23,13 +24,15 @@ export function createExtension({ unpause, pauseReason, config, state }: Extensi
   return (pi: ExtensionAPI): void => {
     pi.setLabel("Google AI Subscription (Antigravity CLI)");
 
-    pi.on("before_agent_start", (event) => {
-      if (!state.enabled || !Array.isArray(event.systemPrompt)) return undefined;
+    pi.on("before_agent_start", (event, ctx) => {
+      if (!state.enabled || !isSubscriptionProvider(ctx.model?.provider)) return undefined;
+      if (!Array.isArray(event.systemPrompt)) return undefined;
       return { systemPrompt: scrubSystemPrompt(event.systemPrompt, config) };
     });
 
-    pi.on("context", (event) => {
-      if (!state.enabled || !Array.isArray(event.messages)) return undefined;
+    pi.on("context", (event, ctx) => {
+      if (!state.enabled || !isSubscriptionProvider(ctx.model?.provider)) return undefined;
+      if (!Array.isArray(event.messages)) return undefined;
       return {
         messages: scrubContextMessages(
           event.messages as unknown as readonly Msg[],
@@ -39,9 +42,7 @@ export function createExtension({ unpause, pauseReason, config, state }: Extensi
     });
 
     pi.on("before_provider_request", (event, ctx) => {
-      if (!state.enabled) return undefined;
-      const provider = ctx.model?.provider;
-      if (provider !== FALLBACK_PROVIDER_ID && provider !== LEGACY_PROVIDER_ID) return undefined;
+      if (!state.enabled || !isSubscriptionProvider(ctx.model?.provider)) return undefined;
       return scrubPayload(event.payload as Record<string, unknown>, config);
     });
 
@@ -71,7 +72,11 @@ export function createExtension({ unpause, pauseReason, config, state }: Extensi
         }
 
         ctx.ui.notify(
-          `agy-byp: ${state.enabled ? "on" : "off"} | providers: ${PRIMARY_PROVIDER_ID} (primary), ${FALLBACK_PROVIDER_ID} (fallback), ${LEGACY_PROVIDER_ID} (legacy) | mode=${config.mode} scrubToolDescriptions=${config.scrubToolDescriptions} unpauseFallback=${config.unpauseFallback} | ${FALLBACK_PROVIDER_ID} pause reason: ${pauseReason(FALLBACK_PROVIDER_ID) ?? "not paused"} | To allow the fallback, add ${FALLBACK_PROVIDER_ID} to auth.unpausedProviders in an operator config layer (user/global), never a project layer. No tokens or credentials are shown.`,
+          [
+            `agy-byp: ${state.enabled ? "on" : "off"} | mode=${config.mode} scrubToolDescriptions=${config.scrubToolDescriptions} unpauseFallback=${config.unpauseFallback}`,
+            `providers: ${PRIMARY_PROVIDER_ID} (primary), ${FALLBACK_PROVIDER_ID} (fallback), ${LEGACY_PROVIDER_ID} (legacy)`,
+            `${FALLBACK_PROVIDER_ID} pause reason: ${pauseReason(FALLBACK_PROVIDER_ID) ?? "not paused"} | To allow the fallback, add ${FALLBACK_PROVIDER_ID} to auth.unpausedProviders in an operator config layer (user/global), never a project layer. No tokens or credentials are shown.`,
+          ].join("\n"),
         );
       },
     });

@@ -12,8 +12,7 @@ test("scrubbing never emits or mutates header/transport fields", () => {
     request: {
       sessionId: "-123",
       labels: { cascade_id: "a", request_id: "t-0" },
-      // The R1 rule matches the full "⁂ Role\n" literal; without the prefix
-      // this string is not scrubbed and the sanity check could never pass.
+      // R1 matches the rendered role line; the "⁂ Role" prefix is inert here.
       systemInstruction: {
         parts: [{ text: "⁂ Role\nYou are omp's trusted coding assistant." }],
       },

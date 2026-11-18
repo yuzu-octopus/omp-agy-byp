@@ -68,8 +68,20 @@ export function scrubPayload<T extends Record<string, unknown>>(
   return clone;
 }
 
+function cloneMessage(message: Msg): Msg {
+  try {
+    return structuredClone(message);
+  } catch {
+    // ToolResultMessage.details / ProviderPayload may hold non-cloneable values.
+    // Copy text-bearing fields only so rewrites never mutate the input message.
+    const copy: Msg = { ...message };
+    if (Array.isArray(copy.content)) copy.content = copy.content.map((part) => ({ ...part }));
+    return copy;
+  }
+}
+
 export function scrubContextMessages(messages: readonly Msg[], config: PluginConfig): Msg[] {
-  const clones: Msg[] = messages.map((message) => structuredClone(message));
+  const clones: Msg[] = messages.map(cloneMessage);
   if (config.mode === "native") return clones;
 
   for (const message of clones) {

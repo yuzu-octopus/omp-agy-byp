@@ -67,7 +67,7 @@ test("generic mode scrubs systemInstruction and contents text", () => {
     "⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.",
   );
   expect(after.request.contents[0].parts[0].text).toBe(
-    "# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nhello",
+    "# Internal URLs\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nhello",
   );
   expect(before.request.contents[0].parts[0].text).toBe(
     "# Internal URLs\nMost FS/bash tools resolve these; path selectors: `read` docs.\n- omp:// ...\n- local:// ...\nhello",
@@ -152,7 +152,7 @@ test("context messages scrub text but keep tool-call ids and names", () => {
     "⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.\nhi",
   );
   expect(secondPart.text).toBe(
-    "# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nok",
+    "# Internal URLs\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nok",
   );
   expect(out[1].toolCallId).toBe("call-9");
   expect(out[1].toolName).toBe("read");
@@ -169,8 +169,30 @@ test("context messages with string content are scrubbed without losing fields", 
   ];
   const out = scrubContextMessages(messages, { ...DEFAULT_CONFIG, mode: "generic" });
   expect(out[0].content).toBe(
-    "# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nhello",
+    "# Internal URLs\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nhello",
   );
   expect(out[0].role).toBe("user");
   expect(out[0].timestamp).toBe(3);
+});
+
+test("context scrubbing survives non-cloneable message fields", () => {
+  const marker = Symbol("details");
+  const callback = () => "not cloneable";
+  const messages = [
+    {
+      role: "toolResult",
+      content: [{ type: "text", text: "You are omp's trusted coding assistant." }],
+      timestamp: 4,
+      details: { callback, marker },
+    },
+  ] as unknown as Parameters<typeof scrubContextMessages>[0];
+  const out = scrubContextMessages(messages, { ...DEFAULT_CONFIG, mode: "generic" });
+  expect((out[0].content as ContentPart[])[0].text).toBe(
+    "You are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.",
+  );
+  expect(out[0].details).toBe(messages[0].details);
+  expect(out[0]).not.toBe(messages[0]);
+  expect((messages[0].content as ContentPart[])[0].text).toBe(
+    "You are omp's trusted coding assistant.",
+  );
 });

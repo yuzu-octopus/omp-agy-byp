@@ -90,11 +90,11 @@ test("default off: three hooks and one command, never unpauses, hooks inert", ()
   expect(calls).toEqual([]);
   expect(
     hooks.before_agent_start!(
-      { systemPrompt: ["⁂ Role\nYou are omp's trusted coding assistant."] },
-      {},
+      { systemPrompt: ["You are omp's trusted coding assistant."] },
+      requestCtx("antigravity-cli"),
     ),
   ).toBeUndefined();
-  expect(hooks.context!({ messages: [] }, {})).toBeUndefined();
+  expect(hooks.context!({ messages: [] }, requestCtx("antigravity-cli"))).toBeUndefined();
   expect(
     hooks.before_provider_request!(requestEvent, requestCtx("antigravity-cli")),
   ).toBeUndefined();
@@ -167,14 +167,14 @@ test("enabled hooks scrub the system prompt and context messages", () => {
     {
       systemPrompt: [
         "⁂ Role\nYou are omp's trusted coding assistant.",
-        "⁂ Runtime\n# Skills & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>",
+        "⁂ Runtime\n# Skills & Rules\nMatching skill → MUST read skill://<name> first.\n<skills>\n- <name>: <description>\n</skills>",
       ],
     },
-    {},
+    requestCtx("antigravity-cli"),
   ) as { systemPrompt: string[] };
   expect(prompt.systemPrompt).toEqual([
     "⁂ Role\nYou are the coding assistant for this Antigravity bridge session. Work inside the user's workspace and use the tools available in this session to complete the request.",
-    "⁂ Runtime\n# Capabilities & Rules\nMatching skill → MUST read `skill://<name>` first.\n<skills>\n- <name>: <description>\n</skills>",
+    "⁂ Runtime\n# Capabilities & Rules\nMatching skill → MUST read skill://<name> first.\n<skills>\n- <name>: <description>\n</skills>",
   ]);
   const messages = hooks.context!(
     {
@@ -187,10 +187,10 @@ test("enabled hooks scrub the system prompt and context messages", () => {
         },
       ],
     },
-    {},
+    requestCtx("antigravity-cli"),
   ) as { messages: { role: string; content: string; timestamp: number }[] };
   expect(messages.messages[0].content).toBe(
-    "# Resource references\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nhi",
+    "# Internal URLs\nThe host resolves these reference schemes; consult `read` docs for path selectors.\n- omp:// ...\n- local:// ...\nhi",
   );
   expect(messages.messages[0].timestamp).toBe(1);
 });
@@ -231,7 +231,7 @@ test("off makes hooks inert again without deactivating or re-pausing", () => {
   ).toBeUndefined();
 });
 
-test("before_provider_request ignores CLI and excluded API-key providers", () => {
+test("before_provider_request ignores excluded API-key providers and scrubs the CLI", () => {
   const hooks: Record<string, Hook> = {};
   const commands: Record<string, CommandHandler> = {};
   attach(hooks, commands, {
@@ -240,7 +240,33 @@ test("before_provider_request ignores CLI and excluded API-key providers", () =>
     config: DEFAULT_CONFIG,
     state: { enabled: true },
   });
-  for (const provider of ["antigravity-cli", "google", "google-vertex"]) {
+  for (const provider of ["google", "google-vertex"]) {
     expect(hooks.before_provider_request!(requestEvent, requestCtx(provider))).toBeUndefined();
+  }
+  const scrubbed = hooks.before_provider_request!(
+    requestEvent,
+    requestCtx("antigravity-cli"),
+  ) as typeof payload;
+  expect(scrubbed.request.systemInstruction.parts[0].text).toContain("# Capabilities & Rules");
+});
+
+test("google and google-vertex pass through every hook untouched", () => {
+  const hooks: Record<string, Hook> = {};
+  const commands: Record<string, CommandHandler> = {};
+  attach(hooks, commands, {
+    unpause: () => {},
+    pauseReason: () => undefined,
+    config: DEFAULT_CONFIG,
+    state: { enabled: true },
+  });
+  const systemPrompt = ["You are omp's trusted coding assistant."];
+  const messages = [
+    { role: "user", content: "You are omp's trusted coding assistant.", timestamp: 1 },
+  ];
+  for (const provider of ["google", "google-vertex"]) {
+    const ctx = requestCtx(provider);
+    expect(hooks.before_agent_start!({ systemPrompt }, ctx)).toBeUndefined();
+    expect(hooks.context!({ messages }, ctx)).toBeUndefined();
+    expect(hooks.before_provider_request!(requestEvent, ctx)).toBeUndefined();
   }
 });
